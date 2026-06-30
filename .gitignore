@@ -1,0 +1,9 @@
+/target
+
+# pdfium 実行時ライブラリ（第三者のビルド済みバイナリ。各自取得する）
+/pdfium.dll
+/lib/
+
+# アプリのログ（参考: %APPDATA%\pdr\pdr.log）
+*.log
+
