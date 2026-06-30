@@ -1,7 +1,6 @@
 /target
 
-# pdfium 実行時ライブラリ（第三者のビルド済みバイナリ。各自取得する）
-/pdfium.dll
+# pdfium ビルド作業用（tgz と展開物）。同梱物は third_party/pdfium/ に置く。
 /lib/
 
 # アプリのログ（参考: %APPDATA%\pdr\pdr.log）

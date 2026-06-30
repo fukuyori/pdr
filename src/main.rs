@@ -40,6 +40,7 @@ fn make_pdfium() -> Result<Pdfium, PdfiumError> {
         }
     }
     dirs.push(PathBuf::from("."));
+    dirs.push(PathBuf::from("./third_party/pdfium"));
     dirs.push(PathBuf::from("./lib/bin"));
 
     for dir in &dirs {

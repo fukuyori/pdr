@@ -1,0 +1,24 @@
+PDR — ポータブル・ドキュメント・リーダー
+Copyright 2026 fukuyori
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+--------------------------------------------------------------------------------
+Bundled third-party software
+--------------------------------------------------------------------------------
+
+This distribution bundles PDFium and its components as a prebuilt shared library
+(third_party/pdfium/pdfium.dll), provided by the pdfium-binaries project.
+
+  - pdfium-binaries packaging — Copyright 2014-2025 Benoit Blanchon (MIT)
+      see third_party/pdfium/LICENSE
+  - PDFium — BSD-3-Clause (Google) and others
+      see third_party/pdfium/licenses/pdfium.txt
+  - Component libraries (FreeType, libpng, zlib, lcms, libjpeg-turbo, libtiff,
+    libopenjpeg, ICU, Abseil, AGG 2.3, fast_float, simdutf, llvm-libc, …)
+      see third_party/pdfium/licenses/
+
+Bundled PDFium build version: see third_party/pdfium/VERSION
+
+When redistributing binaries of PDR, include the third_party/pdfium/LICENSE and
+third_party/pdfium/licenses/ files alongside pdfium.dll.
