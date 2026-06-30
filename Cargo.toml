@@ -3,6 +3,10 @@ name = "pdr"
 version = "0.1.0"
 edition = "2024"
 default-run = "pdr"
+description = "ポータブル・ドキュメント・リーダー — egui/eframe + pdfium 製の PDF ビューア (Windows)"
+license = "Apache-2.0"
+repository = "https://github.com/fukuyori/pdr"
+readme = "README.md"
 
 [dependencies]
 eframe = "0.35.0"

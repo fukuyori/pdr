@@ -45,3 +45,9 @@ cargo test                # テスト
 - `cargo run --bin smoke -- <pdf> [page] [none|contrast|binarize]` — ヘッドレスで 1 ページを PNG 出力
 - `cargo run --bin smoke -- <pdf> toc` — 目次（しおり）をダンプ
 - `cargo run --bin smoke -- <pdf> bench [width] [count]` — 1 ページ描画の所要時間を計測
+
+## ライセンス
+
+本体のコードは **Apache License 2.0**（[LICENSE](LICENSE)）。
+
+本ソフトウェアは描画に [PDFium](https://pdfium.googlesource.com/pdfium/)（`pdfium.dll`, **BSD-3-Clause**）を利用します。`pdfium.dll` は本リポジトリには含めていません（[取得方法](#pdfiumdll-の取得)を参照）。exe と一緒にバイナリ配布する場合は、PDFium の著作権表示とライセンス全文を同梱してください。
