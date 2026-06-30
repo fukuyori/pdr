@@ -86,6 +86,8 @@ enum RenderEvt {
         h: usize,
         pixels: Vec<u8>,
     },
+    /// 致命的エラー（pdfium 初期化失敗など）。世代に関係なく表示する。
+    Fatal(String),
 }
 
 /// 描画スレッド本体。pdfium はここだけが触る。UI スレッドは一切ブロックしない。
@@ -94,6 +96,10 @@ fn render_worker(rx: Receiver<RenderCmd>, tx: Sender<RenderEvt>, ctx: egui::Cont
         Ok(p) => p,
         Err(e) => {
             log_line(&format!("描画スレッド: pdfium 初期化失敗: {e}"));
+            let _ = tx.send(RenderEvt::Fatal(
+                "pdfium.dll を読み込めませんでした。実行ファイルと同じフォルダに pdfium.dll を置いてください。".to_owned(),
+            ));
+            ctx.request_repaint();
             return;
         }
     };
@@ -332,6 +338,9 @@ impl PdrApp {
                         egui::TextureOptions::LINEAR,
                     );
                     self.cache.insert(key, tex);
+                }
+                RenderEvt::Fatal(msg) => {
+                    self.status = msg;
                 }
                 _ => {} // 古い世代の結果は無視
             }
@@ -889,11 +898,16 @@ fn main() -> eframe::Result<()> {
                 .expect("描画スレッド起動失敗");
 
             let mut app = PdrApp::new(cmd_tx, evt_rx);
-            // 引数で PDF パスが渡されたら起動時に開く
-            if let Some(arg) = std::env::args().nth(1) {
+            // 引数で PDF パスが渡されたら起動時に開く（pdr.exe <path.pdf>）
+            let argv: Vec<String> = std::env::args().collect();
+            log_line(&format!("argv = {argv:?}"));
+            if let Some(arg) = argv.get(1) {
                 let path = PathBuf::from(arg);
+                log_line(&format!("arg path={} is_file={}", path.display(), path.is_file()));
                 if path.is_file() {
                     app.open_path(&path);
+                } else {
+                    app.status = format!("ファイルが見つかりません: {arg}");
                 }
             }
             Ok(Box::new(app))

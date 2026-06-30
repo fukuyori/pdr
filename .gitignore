@@ -1,5 +1,8 @@
 /target
 
+# 配布物の出力先（package.ps1 が生成）
+/dist/
+
 # pdfium ビルド作業用（tgz と展開物）。同梱物は third_party/pdfium/ に置く。
 /lib/
 

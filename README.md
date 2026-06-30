@@ -39,6 +39,27 @@ cargo test                # テスト
 
 配布する場合は `pdfium.dll` を実行ファイルと同じフォルダに置いてください。
 
+## インストール（PATH に置いてどこからでも使う）
+
+`pdr.exe` と `pdfium.dll` を**同じフォルダにまとめて置く**だけで、どこからでも起動できます。さらにそのフォルダを PATH に通すと、ターミナルや関連付けから `pdr` を直接呼べます。
+
+1. 配布 zip（`pdr-x.y.z-win-x64.zip`）を展開する。
+   （または `cargo build --release` 後に `target\release\pdr.exe` と `third_party\pdfium\pdfium.dll` を用意）
+2. 置き場所を作り（例: `%USERPROFILE%\bin`）、**`pdr.exe` と `pdfium.dll` の両方**をそこへコピーする。
+3. そのフォルダを PATH に追加する（PowerShell・ユーザー環境変数の例。設定後はターミナルを開き直す）:
+
+   ```powershell
+   setx PATH "$env:USERPROFILE\bin;$env:PATH"
+   ```
+
+4. 以降はどこからでも実行できる:
+
+   ```powershell
+   pdr "C:\path\to\file.pdf"
+   ```
+
+> **重要**: `pdfium.dll` は必ず `pdr.exe` と**同じフォルダ**に置いてください（PATH 上の別フォルダではなく exe と同居が必要）。本アプリは実行ファイルと同じフォルダを最優先で探すため、これで起動ディレクトリに関係なく動作します。
+
 ## 補助バイナリ
 
 - `cargo run --bin smoke -- <pdf> [page] [none|contrast|binarize]` — ヘッドレスで 1 ページを PNG 出力
