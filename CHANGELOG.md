@@ -4,6 +4,14 @@
 書式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
 
+## [0.1.4] - 2026-07-01
+
+### 追加
+- アプリアイコンを追加（macOS `.app` に `AppIcon.icns` を埋め込み、実行時にも
+  `with_icon` でウィンドウ／Dock アイコンを設定）。
+- macOS 用の署名・公証済み DMG を作成するスクリプト（`.app` 生成 → 署名 →
+  公証 → ステープル）。※スクリプトは署名 ID を含むため未追跡。
+
 ## [0.1.3] - 2026-07-01
 
 ### 追加
@@ -42,6 +50,7 @@
 - 初回リリース。PDF ポータブル ドキュメント リーダー（egui/eframe + pdfium）。
   見開き表示、縦／横綴じ、目次（しおり）、適応解像度の別スレッド描画に対応。
 
+[0.1.4]: https://github.com/fukuyori/pdr/compare/0.1.3...0.1.4
 [0.1.3]: https://github.com/fukuyori/pdr/compare/0.1.2...0.1.3
 [0.1.2]: https://github.com/fukuyori/pdr/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/fukuyori/pdr/compare/0.1.0...0.1.1

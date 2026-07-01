@@ -29,6 +29,16 @@ const TOC_WIDTH_MIN: f32 = 160.0;
 const TOC_WIDTH_MAX: f32 = 700.0;
 const TOC_WIDTH_STEP: f32 = 40.0;
 
+fn load_app_icon() -> Result<egui::IconData, image::ImageError> {
+    let icon = image::load_from_memory(include_bytes!("../assets/AppIcon.png"))?.to_rgba8();
+    let (width, height) = icon.dimensions();
+    Ok(egui::IconData {
+        rgba: icon.into_raw(),
+        width,
+        height,
+    })
+}
+
 /// pdfium バインディングを生成する（所有権付き）。描画スレッドで 1 度だけ呼ぶ。
 fn make_pdfium() -> Result<Pdfium, PdfiumError> {
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -911,11 +921,24 @@ impl eframe::App for PdrApp {
 }
 
 fn main() -> eframe::Result<()> {
+    let icon = match load_app_icon() {
+        Ok(icon) => Some(icon),
+        Err(err) => {
+            log_line(&format!("アプリアイコン読み込み失敗: {err}"));
+            None
+        }
+    };
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1200.0, 850.0])
+        .with_title("PDR - ポータブル・ドキュメント・リーダー");
+    if let Some(icon) = icon {
+        viewport = viewport.with_icon(icon);
+    }
+
     #[allow(unused_mut)]
     let mut options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 850.0])
-            .with_title("PDR - ポータブル・ドキュメント・リーダー"),
+        viewport,
         ..Default::default()
     };
     // macOS では既定の wgpu(Metal) だとウィンドウが真っ白/真っ黒のまま

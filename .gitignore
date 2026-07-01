@@ -9,3 +9,6 @@
 # アプリのログ（参考: %APPDATA%\pdr\pdr.log）
 *.log
 
+# 署名 ID・Team ID 等を含むため管理対象外にする
+/scripts/package-macos.sh
+
