@@ -872,12 +872,20 @@ impl eframe::App for PdrApp {
 }
 
 fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions {
+    #[allow(unused_mut)]
+    let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 850.0])
             .with_title("PDR - ポータブル・ドキュメント・リーダー"),
         ..Default::default()
     };
+    // macOS では既定の wgpu(Metal) だとウィンドウが真っ白/真っ黒のまま
+    // 描画されないため、glow(OpenGL) レンダラーを使う。
+    // Windows は既定(wgpu)のまま。
+    #[cfg(target_os = "macos")]
+    {
+        options.renderer = eframe::Renderer::Glow;
+    }
     eframe::run_native(
         "PDR",
         options,
@@ -915,12 +923,23 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-/// 日本語が豆腐(□)にならないよう、Windows 同梱フォントを読み込む
+/// 日本語が豆腐(□)にならないよう、OS 同梱の日本語フォントを読み込む
+/// (Windows / macOS / Linux の順に候補を探索する)
 fn install_japanese_font(ctx: &egui::Context) {
     let candidates = [
+        // Windows
         r"C:\Windows\Fonts\meiryo.ttc",
         r"C:\Windows\Fonts\YuGothM.ttc",
         r"C:\Windows\Fonts\msgothic.ttc",
+        // macOS
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Osaka.ttf",
+        // Linux
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     ];
     for path in candidates {
         if let Ok(bytes) = std::fs::read(path) {

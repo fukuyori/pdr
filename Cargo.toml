@@ -1,6 +1,6 @@
 [package]
 name = "pdr"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 default-run = "pdr"
 description = "ポータブル・ドキュメント・リーダー — egui/eframe + pdfium 製の PDF ビューア (Windows)"
@@ -9,7 +9,7 @@ repository = "https://github.com/fukuyori/pdr"
 readme = "README.md"
 
 [dependencies]
-eframe = "0.35.0"
+eframe = { version = "0.35.0", features = ["glow"] }
 egui = "0.35.0"
 image = "0.25.10"
 pdfium-render = "0.9.2"
