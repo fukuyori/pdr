@@ -4,6 +4,17 @@
 書式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
 
+## [0.1.3] - 2026-07-01
+
+### 追加
+- 表示エリアの左端／右端クリックでページを移動できるようにした（綴じ方向に連動。
+  左綴じ=右で次・左で前、右綴じ=左で次・右で前）。
+- トラックパッドのピンチで拡大・縮小できるようにした。
+
+### 変更
+- 二本指スクロール（およびマウスホイール）を画像のパン（移動）に割り当てた。
+  拡大・縮小はピンチ、または修飾キー＋ホイール（macOS: Cmd、Windows: Ctrl）で行う。
+
 ## [0.1.2] - 2026-07-01
 
 ### 追加
@@ -31,6 +42,7 @@
 - 初回リリース。PDF ポータブル ドキュメント リーダー（egui/eframe + pdfium）。
   見開き表示、縦／横綴じ、目次（しおり）、適応解像度の別スレッド描画に対応。
 
+[0.1.3]: https://github.com/fukuyori/pdr/compare/0.1.2...0.1.3
 [0.1.2]: https://github.com/fukuyori/pdr/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/fukuyori/pdr/compare/0.1.0...0.1.1
 [0.1.0]: https://github.com/fukuyori/pdr/releases/tag/0.1.0

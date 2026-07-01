@@ -15,8 +15,6 @@ use pdr::enhance::{Enhance, apply_enhance};
 /// テクスチャキャッシュの保持枚数（(ページ,解像度,補正)単位）。
 const CACHE_CAP: usize = 24;
 
-/// マウスホイール 1 目盛り相当の拡大係数の指数係数。
-const ZOOM_WHEEL_K: f32 = 0.0015;
 /// フィット倍率にスナップ(吸着)する相対しきい値（±2%）。
 const FIT_SNAP: f32 = 0.02;
 
@@ -755,13 +753,10 @@ impl eframe::App for PdrApp {
             let bucket = bucketize(disp_w * ctx.pixels_per_point());
             self.cur_bucket = bucket;
 
-            // ホイールは拡大縮小に使うので、スクロール領域のホイール操作は無効化し、
-            // パン(移動)はスクロールバーとドラッグで行う。
+            // 二本指スクロール(ホイール)・スクロールバー・ドラッグでパン(移動)する。
+            // 拡大縮小はピンチ(および Ctrl+ホイール)のみで行う。
             egui::ScrollArea::both()
-                .scroll_source(
-                    egui::scroll_area::ScrollSource::SCROLL_BAR
-                        | egui::scroll_area::ScrollSource::DRAG,
-                )
+                .scroll_source(egui::scroll_area::ScrollSource::ALL)
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         for &idx in &pages {
@@ -796,20 +791,21 @@ impl eframe::App for PdrApp {
             Some((fit_w, fit_h))
         });
 
-        // マウスホイールで表示倍率を増減（ポインタが本文領域にあるときだけ）。
+        // トラックパッドのピンチ（および Ctrl+ホイール）で表示倍率を増減（ポインタが本文
+        // 領域にあるときだけ）。二本指スクロールはパンに使うのでズームには使わない。
         // 横/縦フィット倍率の近くでは、その基準に乗り換えて zoom=1.0 に吸着させる。
         if let Some((fw, fh)) = central.inner {
-            let scroll_y = ctx.input(|i| i.smooth_scroll_delta.y);
+            // ピンチ／Ctrl+ホイールは zoom_delta()（拡大係数、1.0=変化なし）で届く。
+            let factor = ctx.input(|i| i.zoom_delta());
             let over_central = ctx
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|p| central.response.rect.contains(p));
-            if scroll_y.abs() > 0.0 && over_central {
+            if (factor - 1.0).abs() > f32::EPSILON && over_central {
                 let ref_fit = match self.fit_ref {
                     FitKind::Width => fw,
                     FitKind::Height => fh,
                     FitKind::Window => fw.min(fh),
                 };
-                let factor = (scroll_y * ZOOM_WHEEL_K).exp();
                 // いったん絶対倍率に直して増減・クランプ
                 let s = (ref_fit * self.zoom * factor).clamp(0.1 * fw.min(fh), 10.0 * fw.max(fh));
 
@@ -853,6 +849,49 @@ impl eframe::App for PdrApp {
                         self.toc_width
                     ));
                     self.toc_width = nw;
+                }
+                ctx.request_repaint();
+            }
+        }
+
+        // 表示の左端／右端クリックでページを移動する（本のようにめくる）。
+        // クリックだけを拾い、ドラッグ(パン)やスクロールは下の ScrollArea に通す。
+        // 綴じ方向に応じて左右に「次/前」を割り当てる。
+        if self.page_count > 0 {
+            let rect = central.response.rect;
+            let zone_w = (rect.width() * 0.12).clamp(48.0, 160.0);
+            let left_zone =
+                egui::Rect::from_min_max(rect.min, egui::pos2(rect.left() + zone_w, rect.bottom()));
+            let right_zone =
+                egui::Rect::from_min_max(egui::pos2(rect.right() - zone_w, rect.top()), rect.max);
+            let left = ui.interact(
+                left_zone,
+                egui::Id::new("page_click_left"),
+                egui::Sense::click(),
+            );
+            let right = ui.interact(
+                right_zone,
+                egui::Id::new("page_click_right"),
+                egui::Sense::click(),
+            );
+            if left.hovered() || right.hovered() {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            // 左クリックが「次」かどうか。綴じ方向で反転する。
+            let left_is_next = matches!(self.binding, Binding::RightToLeft);
+            if left.clicked() {
+                if left_is_next {
+                    self.next();
+                } else {
+                    self.prev();
+                }
+                ctx.request_repaint();
+            }
+            if right.clicked() {
+                if left_is_next {
+                    self.prev();
+                } else {
+                    self.next();
                 }
                 ctx.request_repaint();
             }
