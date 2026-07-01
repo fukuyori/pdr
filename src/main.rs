@@ -12,6 +12,9 @@ use pdfium_render::prelude::*;
 
 use pdr::enhance::{Enhance, apply_enhance};
 
+#[cfg(target_os = "macos")]
+mod macos_open;
+
 /// テクスチャキャッシュの保持枚数（(ページ,解像度,補正)単位）。
 const CACHE_CAP: usize = 24;
 
@@ -493,6 +496,14 @@ impl eframe::App for PdrApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
+        // macOS: Finder から開かれたファイルがあれば開く。
+        #[cfg(target_os = "macos")]
+        for path in macos_open::take_pending() {
+            if path.is_file() {
+                self.open_path(&path);
+            }
+        }
+
         // 描画スレッドからの結果を取り込む
         self.drain_events(&ctx);
 
@@ -921,6 +932,20 @@ impl eframe::App for PdrApp {
 }
 
 fn main() -> eframe::Result<()> {
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("PDR {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    // macOS: Finder の PDF ダブルクリックからのコールドローンチを取り逃がさないよう、
+    // eframe/winit のイベントループ生成前に open-documents Apple Event を受け始める。
+    #[cfg(target_os = "macos")]
+    {
+        macos_open::register_document_class();
+        macos_open::install();
+        macos_open::capture_current_event();
+    }
+
     let icon = match load_app_icon() {
         Ok(icon) => Some(icon),
         Err(err) => {
@@ -957,6 +982,15 @@ fn main() -> eframe::Result<()> {
                 log_line(&format!("log file: {}", p.display()));
             }
             install_japanese_font(&cc.egui_ctx);
+
+            // macOS: eframe/winit 側の初期化後にも再登録し、既定ハンドラに戻された場合に備える。
+            #[cfg(target_os = "macos")]
+            {
+                macos_open::register_document_class();
+                macos_open::install();
+                macos_open::patch_application_delegate();
+                macos_open::capture_current_event();
+            }
 
             // 描画スレッドを起動（pdfium はこのスレッドだけが触る）
             let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
