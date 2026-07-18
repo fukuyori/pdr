@@ -33,7 +33,12 @@ const TOC_WIDTH_MAX: f32 = 700.0;
 const TOC_WIDTH_STEP: f32 = 40.0;
 
 fn load_app_icon() -> Result<egui::IconData, image::ImageError> {
-    let icon = image::load_from_memory(include_bytes!("../assets/AppIcon.png"))?.to_rgba8();
+    #[cfg(target_os = "windows")]
+    let icon_bytes = include_bytes!("../assets/AppIconWindows.png");
+    #[cfg(not(target_os = "windows"))]
+    let icon_bytes = include_bytes!("../assets/AppIcon.png");
+
+    let icon = image::load_from_memory(icon_bytes)?.to_rgba8();
     let (width, height) = icon.dimensions();
     Ok(egui::IconData {
         rgba: icon.into_raw(),

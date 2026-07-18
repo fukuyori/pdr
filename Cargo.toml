@@ -1,6 +1,6 @@
 [package]
 name = "pdr"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 default-run = "pdr"
 description = "ポータブル・ドキュメント・リーダー — egui/eframe + pdfium 製の PDF ビューア (Windows)"
@@ -33,3 +33,6 @@ objc2-foundation = { version = "0.3", features = [
     "NSURL",
     "objc2-core-services",
 ] }
+
+[build-dependencies]
+winresource = "0.1.31"

@@ -5,6 +5,17 @@
 use std::path::Path;
 
 fn main() {
+    // 「アプリで開く」などの Windows シェル UI は、実行時に設定する
+    // ウィンドウアイコンではなく exe 内の RT_GROUP_ICON を参照する。
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo:rerun-if-changed=assets/AppIconWindows.png");
+        println!("cargo:rerun-if-changed=assets/AppIcon.ico");
+        winresource::WindowsResource::new()
+            .set_icon("assets/AppIcon.ico")
+            .compile()
+            .expect("Windows アイコンリソースをコンパイルできませんでした");
+    }
+
     // プラットフォームごとの同梱ライブラリ名。存在するものだけコピーする。
     let lib_names = ["pdfium.dll", "libpdfium.dylib"];
 
