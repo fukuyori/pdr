@@ -264,6 +264,8 @@ struct PdrApp {
     /// 描画スレッドへの送信／受信
     to_worker: Sender<RenderCmd>,
     from_worker: Receiver<RenderEvt>,
+    /// Linux ではファイルダイアログの起動が遅い環境があるため、UI スレッド外で待つ。
+    file_dialog_rx: Option<Receiver<Option<PathBuf>>>,
     status: String,
 }
 
@@ -288,6 +290,7 @@ impl PdrApp {
             doc_gen: 0,
             to_worker,
             from_worker,
+            file_dialog_rx: None,
             status: "ファイルを開いてください".to_owned(),
         }
     }
@@ -361,6 +364,39 @@ impl PdrApp {
                 _ => {} // 古い世代の結果は無視
             }
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn start_file_dialog(&mut self, ctx: egui::Context) {
+        if self.file_dialog_rx.is_some() {
+            return;
+        }
+        self.status = "ファイル選択を待っています".to_owned();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("file-dialog".into())
+            .spawn(move || {
+                let path = rfd::FileDialog::new()
+                    .add_filter("PDF", &["pdf"])
+                    .pick_file();
+                let _ = tx.send(path);
+                ctx.request_repaint();
+            })
+            .expect("ファイルダイアログスレッド起動失敗");
+        self.file_dialog_rx = Some(rx);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn take_file_dialog_result(&mut self) -> Option<Option<PathBuf>> {
+        let result = self.file_dialog_rx.as_ref().and_then(|rx| match rx.try_recv() {
+            Ok(path) => Some(path),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+        });
+        if result.is_some() {
+            self.file_dialog_rx = None;
+        }
+        result
     }
 
     /// 指定キーがキャッシュにも依頼中にも無ければ、描画スレッドに依頼する。
@@ -511,6 +547,14 @@ impl eframe::App for PdrApp {
 
         // 描画スレッドからの結果を取り込む
         self.drain_events(&ctx);
+        #[cfg(target_os = "linux")]
+        if let Some(result) = self.take_file_dialog_result() {
+            if let Some(path) = result {
+                self.open_path(&path);
+            } else if self.page_count == 0 {
+                self.status = "ファイルを開いてください".to_owned();
+            }
+        }
 
         let mut go_next = false;
         let mut go_prev = false;
@@ -549,6 +593,10 @@ impl eframe::App for PdrApp {
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("📂 開く").clicked() {
+                    #[cfg(target_os = "linux")]
+                    self.start_file_dialog(ctx.clone());
+
+                    #[cfg(not(target_os = "linux"))]
                     if let Some(p) = rfd::FileDialog::new()
                         .add_filter("PDF", &["pdf"])
                         .pick_file()
@@ -959,9 +1007,14 @@ fn main() -> eframe::Result<()> {
         }
     };
 
+    #[cfg(target_os = "linux")]
+    let window_title = "PDR - Portable Document Reader";
+    #[cfg(not(target_os = "linux"))]
+    let window_title = "PDR - ポータブル・ドキュメント・リーダー";
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1200.0, 850.0])
-        .with_title("PDR - ポータブル・ドキュメント・リーダー");
+        .with_title(window_title);
     if let Some(icon) = icon {
         viewport = viewport.with_icon(icon);
     }

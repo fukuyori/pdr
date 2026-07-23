@@ -39,6 +39,16 @@ cargo test                # テスト
 
 配布する場合は `pdfium.dll` を実行ファイルと同じフォルダに置いてください。
 
+## Linux deb パッケージ作成
+
+Linux 用の deb は次で作成できます。
+
+```sh
+scripts/package-deb.sh --download-pdfium
+```
+
+出力は `dist/pdr_<version>_<arch>.deb` です。既に `third_party/pdfium/libpdfium.so` がある場合は `--download-pdfium` なしで実行できます。ビルド済みバイナリを使う場合は `scripts/package-deb.sh --no-build` を指定してください。
+
 ## インストール（PATH に置いてどこからでも使う）
 
 `pdr.exe` と `pdfium.dll` を**同じフォルダにまとめて置く**だけで、どこからでも起動できます。さらにそのフォルダを PATH に通すと、ターミナルや関連付けから `pdr` を直接呼べます。

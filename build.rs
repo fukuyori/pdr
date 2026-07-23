@@ -2,6 +2,7 @@
 // これにより、起動時のカレントディレクトリに関係なく pdfium が見つかる。
 //   - Windows: pdfium.dll
 //   - macOS:   libpdfium.dylib
+//   - Linux:   libpdfium.so
 use std::path::Path;
 
 fn main() {
@@ -17,7 +18,7 @@ fn main() {
     }
 
     // プラットフォームごとの同梱ライブラリ名。存在するものだけコピーする。
-    let lib_names = ["pdfium.dll", "libpdfium.dylib"];
+    let lib_names = ["pdfium.dll", "libpdfium.dylib", "libpdfium.so"];
 
     let out_dir = match std::env::var("OUT_DIR") {
         Ok(d) => d,
