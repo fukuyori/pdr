@@ -376,9 +376,7 @@ impl PdrApp {
         std::thread::Builder::new()
             .name("file-dialog".into())
             .spawn(move || {
-                let path = rfd::FileDialog::new()
-                    .add_filter("PDF", &["pdf"])
-                    .pick_file();
+                let path = Self::pick_pdf_file_linux();
                 let _ = tx.send(path);
                 ctx.request_repaint();
             })
@@ -397,6 +395,31 @@ impl PdrApp {
             self.file_dialog_rx = None;
         }
         result
+    }
+
+    #[cfg(target_os = "linux")]
+    fn pick_pdf_file_linux() -> Option<PathBuf> {
+        match std::process::Command::new("zenity")
+            .args([
+                "--file-selection",
+                "--title=Open PDF",
+                "--file-filter=PDF files | *.pdf",
+            ])
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+                if path.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(path))
+                }
+            }
+            Ok(_) => None,
+            Err(_) => rfd::FileDialog::new()
+                .add_filter("PDF", &["pdf"])
+                .pick_file(),
+        }
     }
 
     /// 指定キーがキャッシュにも依頼中にも無ければ、描画スレッドに依頼する。

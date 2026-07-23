@@ -188,7 +188,7 @@ if [ -d "$pdfium_doc_dir/licenses" ]; then
 fi
 
 installed_size="$(du -sk "$stage/usr" | awk '{print $1}')"
-depends="libc6, libgcc-s1, fonts-noto-cjk | fonts-ipafont-gothic | fonts-vlgothic"
+depends="libc6, libgcc-s1, zenity, fonts-noto-cjk | fonts-ipafont-gothic | fonts-vlgothic"
 
 cat > "$stage/DEBIAN/control" <<EOF
 Package: pdr
