@@ -265,6 +265,7 @@ struct PdrApp {
     to_worker: Sender<RenderCmd>,
     from_worker: Receiver<RenderEvt>,
     /// Linux ではファイルダイアログの起動が遅い環境があるため、UI スレッド外で待つ。
+    #[cfg(target_os = "linux")]
     file_dialog_rx: Option<Receiver<Option<PathBuf>>>,
     status: String,
 }
@@ -290,6 +291,7 @@ impl PdrApp {
             doc_gen: 0,
             to_worker,
             from_worker,
+            #[cfg(target_os = "linux")]
             file_dialog_rx: None,
             status: "ファイルを開いてください".to_owned(),
         }
