@@ -4,12 +4,45 @@
 書式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、
 バージョニングは [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
 
+## [Unreleased]
+
+### 修正
+- macOS/Windows ビルドで `file_dialog_rx` フィールドが未使用となり dead_code
+  警告が出ていたのを解消（Linux 限定に条件付けした）。
+
+## [0.1.8] - 2026-07-23
+
+### 変更
+- Linux のファイル選択を `zenity`（あれば）優先にし、無い場合は従来どおり
+  `rfd` にフォールバックするようにした。
+
+## [0.1.7] - 2026-07-23
+
+### 追加
+- Linux 用 deb パッケージ作成スクリプト `scripts/package-deb.sh` を追加
+  （`--download-pdfium` / `--no-build` オプション対応）。
+- `build.rs` が `libpdfium.so`（Linux）も実行ファイルと同じ場所へコピーする
+  ようにした。
+- README に Linux deb パッケージの作成手順を追記。
+
+### 変更
+- Linux ではファイルダイアログの起動が遅い環境に備え、選択を UI スレッド外で
+  待つようにした。またウィンドウタイトルを英語表記にした。
+
 ## [0.1.6] - 2026-07-18
 
 ### 修正
 - Windows 版の `pdr.exe` にアプリアイコンを埋め込み、「アプリで開く」などの
   Windows シェル UI でも PDR のアイコンが表示されるようにした。小さい表示でも
   絵柄が見やすいよう、Windows 用アイコンの外周余白も調整した。
+
+## [0.1.5] - 2026-07-01
+
+### 追加
+- macOS で Finder から PDF を開けるようにした（ダブルクリック・「PDR で開く」、
+  コールドローンチ含む）。open-documents Apple Event を受け取り、起動中／起動時
+  いずれのオープンも処理する。
+- コマンドラインの `--version` / `-V` でバージョンを表示できるようにした。
 
 ## [0.1.4] - 2026-07-01
 
@@ -57,7 +90,11 @@
 - 初回リリース。PDF ポータブル ドキュメント リーダー（egui/eframe + pdfium）。
   見開き表示、縦／横綴じ、目次（しおり）、適応解像度の別スレッド描画に対応。
 
+[Unreleased]: https://github.com/fukuyori/pdr/compare/0.1.8...HEAD
+[0.1.8]: https://github.com/fukuyori/pdr/compare/0.1.7...0.1.8
+[0.1.7]: https://github.com/fukuyori/pdr/compare/0.1.6...0.1.7
 [0.1.6]: https://github.com/fukuyori/pdr/compare/0.1.5...0.1.6
+[0.1.5]: https://github.com/fukuyori/pdr/compare/0.1.4...0.1.5
 [0.1.4]: https://github.com/fukuyori/pdr/compare/0.1.3...0.1.4
 [0.1.3]: https://github.com/fukuyori/pdr/compare/0.1.2...0.1.3
 [0.1.2]: https://github.com/fukuyori/pdr/compare/0.1.1...0.1.2
