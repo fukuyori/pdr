@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-06
+
+### 追加
+- スキャンPDF向けに、ページごとの文字濃度と背景明度を平準化する自動レベル補正を追加。
+- アンシャープマスクによる文字輪郭の強調を追加。
+
+### 変更
+- コントラスト補正とシャープ補正を0～100%のスライダーで調整し、同時適用できるようにした。
+- 補正設定の確定時だけ再描画し、異なる設定の描画キャッシュを破棄するようにした。
+
 ## [0.2.0] - 2026-09-06
 
 ### 修正
@@ -97,7 +107,8 @@
 - 初回リリース。PDF ポータブル ドキュメント リーダー（egui/eframe + pdfium）。
   見開き表示、縦／横綴じ、目次（しおり）、適応解像度の別スレッド描画に対応。
 
-[Unreleased]: https://github.com/fukuyori/pdr/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/fukuyori/pdr/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/fukuyori/pdr/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/fukuyori/pdr/compare/0.1.8...0.2.0
 [0.1.8]: https://github.com/fukuyori/pdr/compare/0.1.7...0.1.8
 [0.1.7]: https://github.com/fukuyori/pdr/compare/0.1.6...0.1.7

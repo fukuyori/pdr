@@ -85,8 +85,10 @@ struct PdrApp {
     fit_ref: FitKind,
     /// フィット基準に対する倍率（1.0 = ちょうどフィット）。マウスホイールで増減。
     zoom: f32,
-    /// 画像補正モード
+    /// 描画に適用中の画像補正設定
     enhance: Enhance,
+    /// スライダー操作中の画像補正設定。操作確定時に `enhance` へ反映する。
+    enhance_draft: Enhance,
     /// 目次（しおり）。空でなければ自動的に左パネルを表示する。
     toc: Vec<TocEntry>,
     /// 目次パネルの幅(px)。ドラッグ／ボタンで変更する。
@@ -121,7 +123,8 @@ impl PdrApp {
             cover_alone: true,
             fit_ref: FitKind::Window,
             zoom: 1.0,
-            enhance: Enhance::None,
+            enhance: Enhance::NONE,
+            enhance_draft: Enhance::NONE,
             toc: Vec::new(),
             toc_width: TOC_WIDTH_DEFAULT,
             recent: load_recent(),
@@ -192,6 +195,9 @@ impl PdrApp {
                     pixels,
                 } if doc_gen == self.doc_gen => {
                     self.requested.remove(&key);
+                    if key.2 != self.enhance {
+                        continue;
+                    }
                     let color = egui::ColorImage::from_rgba_unmultiplied([w, h], &pixels);
                     let tex = ctx.load_texture(
                         format!("p{}_{}", key.0, key.1),
@@ -276,6 +282,15 @@ impl PdrApp {
             enhance: key.2,
             doc_gen: self.doc_gen,
         });
+    }
+
+    /// スライダーで確定した補正設定を反映し、異なる設定のキャッシュを破棄する。
+    fn apply_enhance_draft(&mut self) {
+        if self.enhance == self.enhance_draft {
+            return;
+        }
+        self.enhance = self.enhance_draft;
+        self.cache.retain(|(_, _, enhance), _| *enhance == self.enhance);
     }
 
     /// 表示に使えるテクスチャを返す。完全一致が無ければ、同じページの別解像度を
@@ -518,21 +533,62 @@ impl eframe::App for PdrApp {
                 }
 
                 ui.separator();
-                egui::ComboBox::from_label("補正")
-                    .selected_text(match self.enhance {
-                        Enhance::None => "なし",
-                        Enhance::Contrast => "コントラスト",
-                        Enhance::Binarize => "二値化",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.enhance, Enhance::None, "なし");
-                        ui.selectable_value(&mut self.enhance, Enhance::Contrast, "コントラスト");
-                        ui.selectable_value(&mut self.enhance, Enhance::Binarize, "二値化");
-                    });
-
-                ui.separator();
                 if self.page_count > 0 {
                     ui.label(format!("{} / {}", self.current + 1, self.page_count));
+                }
+            });
+        });
+
+        egui::Panel::top("enhance_controls").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("画像補正:");
+
+                let mut apply_draft = false;
+                if ui
+                    .checkbox(&mut self.enhance_draft.binarize, "二値化")
+                    .on_hover_text("二値化中はコントラストとシャープを適用しません")
+                    .changed()
+                {
+                    apply_draft = true;
+                }
+
+                ui.add_enabled_ui(!self.enhance_draft.binarize, |ui| {
+                    let auto_level = ui
+                        .checkbox(&mut self.enhance_draft.auto_level, "自動レベル")
+                        .on_hover_text("ページごとに文字の濃さと背景の明るさを平準化します");
+                    if auto_level.changed() {
+                        if self.enhance_draft.auto_level && self.enhance_draft.contrast == 0 {
+                            self.enhance_draft.contrast = 50;
+                        }
+                        apply_draft = true;
+                    }
+
+                    ui.spacing_mut().slider_width = 120.0;
+
+                    let contrast = ui.add(
+                        egui::Slider::new(&mut self.enhance_draft.contrast, 0..=100)
+                            .text("コントラスト")
+                            .suffix("%"),
+                    );
+                    apply_draft |=
+                        contrast.drag_stopped() || (contrast.changed() && !contrast.dragged());
+
+                    let sharpen = ui.add(
+                        egui::Slider::new(&mut self.enhance_draft.sharpen, 0..=100)
+                            .text("シャープ")
+                            .suffix("%"),
+                    );
+                    apply_draft |=
+                        sharpen.drag_stopped() || (sharpen.changed() && !sharpen.dragged());
+                });
+
+                if ui.button("リセット").clicked() {
+                    self.enhance_draft = Enhance::NONE;
+                    apply_draft = true;
+                }
+
+                if apply_draft {
+                    self.apply_enhance_draft();
                 }
             });
         });

@@ -9,7 +9,7 @@ egui/eframe + pdfium による描画で、見開き・縦横綴じ・目次・�
 - **目次（しおり）**: ある PDF では左に自動表示。クリックでジャンプ、幅も変更可
 - **ページ移動**: 前後ボタン、矢印/PageUp/Down/Space、下部スライダー
 - **拡大縮小**: マウスホイール。横/縦フィットへスナップ、ウィンドウのリサイズに追従
-- **画像補正**: スキャン PDF 向けにコントラスト伸長 / 大津法二値化
+- **画像補正**: スキャンPDF向けに、ページ単位の自動レベル補正、強度調整可能なコントラスト／アンシャープマスク、大津法二値化
 - **高速描画**: 別スレッドでレンダリングし UI をブロックしない。表示サイズに応じた適応解像度＋前後ページの先読み
 - **履歴**: 最近開いたファイルを記憶（`%APPDATA%\pdr\recent.txt`）
 
@@ -72,7 +72,7 @@ scripts/package-deb.sh --download-pdfium
 
 ## 補助バイナリ
 
-- `cargo run --bin smoke -- <pdf> [page] [none|contrast|binarize]` — ヘッドレスで 1 ページを PNG 出力
+- `cargo run --bin smoke -- <pdf> [page] [none|contrast|auto|sharpen|binarize] [strength]` — ヘッドレスで1ページをPNG出力
 - `cargo run --bin smoke -- <pdf> toc` — 目次（しおり）をダンプ
 - `cargo run --bin smoke -- <pdf> bench [width] [count]` — 1 ページ描画の所要時間を計測
 

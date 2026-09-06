@@ -1,5 +1,5 @@
 // ヘッドレスでの描画検証用:
-//   smoke <pdf path> [page] [none|contrast|binarize]
+//   smoke <pdf path> [page] [none|contrast|auto|sharpen|binarize] [strength]
 // 指定ページを補正適用して PNG 出力する。
 use pdfium_render::prelude::*;
 use pdr::enhance::{Enhance, apply_enhance};
@@ -8,13 +8,21 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let pdf = args
         .get(1)
-        .expect("usage: smoke <pdf path> [page] [none|contrast|binarize]");
+        .expect("usage: smoke <pdf path> [page] [none|contrast|auto|sharpen|binarize] [strength]");
     let page_no: i32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let mode = match args.get(3).map(|s| s.as_str()) {
-        Some("contrast") => Enhance::Contrast,
-        Some("binarize") => Enhance::Binarize,
-        _ => Enhance::None,
+    let strength: u8 = args
+        .get(4)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100)
+        .min(100);
+    let (mut mode, mode_name) = match args.get(3).map(|s| s.as_str()) {
+        Some("contrast") => (Enhance::new(strength, 0, false), "contrast"),
+        Some("auto") => (Enhance::new(strength, 0, false), "auto"),
+        Some("sharpen") => (Enhance::new(0, strength, false), "sharpen"),
+        Some("binarize") => (Enhance::new(0, 0, true), "binarize"),
+        _ => (Enhance::NONE, "none"),
     };
+    mode.auto_level = mode_name == "auto";
 
     let path = Pdfium::pdfium_platform_library_name_at_path(".");
     let bindings = Pdfium::bind_to_library(&path)
@@ -79,7 +87,7 @@ fn main() {
     let bitmap = page.render_with_config(&config).expect("render");
     let image = apply_enhance(bitmap.as_image().expect("image"), mode);
 
-    let out = format!("smoke_p{page_no}_{mode:?}.png");
+    let out = format!("smoke_p{page_no}_{mode_name}_{strength}.png");
     image.into_luma8().save(&out).expect("save");
     println!("wrote {out}");
     println!("OK");
