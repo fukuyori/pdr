@@ -11,7 +11,7 @@
 - [x] `Cargo.toml` の `[package].version`
 - [x] `Cargo.lock` の `pdr` パッケージのバージョン
 - [x] `CHANGELOG.md` のリリース見出しと比較リンク
-- [x] `docs/pdf-editing-implementation-plan.md` のバージョン変更状況
+- [x] `docs/pdf-editing-decision.md` のフェーズ0とバージョン変更状況
 
 ## 変更不要であることを確認する対象
 
@@ -28,4 +28,4 @@
 - [x] PowerShell から `cargo test` が成功する
 - [x] `cargo run -- --version` が `PDR 0.2.0` を表示する
 - [x] パッケージ作成を行っていない
-- [x] コミット、タグ作成、プッシュを行っていない
+- [x] タグ作成、リリース発行を行っていない
