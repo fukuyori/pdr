@@ -7,7 +7,7 @@
 #   scripts/package-deb.sh --download-pdfium
 #
 # 出力:
-#   dist/pdr_<version>_<arch>.deb
+#   dist/pdr-<version>-linux-<arch>.deb
 #
 # 既定では cargo build --release を実行する。PDFium は
 # third_party/pdfium/libpdfium.so を同梱する。無い場合は
@@ -205,7 +205,7 @@ EOF
 
 dist="$root/dist"
 mkdir -p "$dist"
-deb="$dist/${pkg_name}_${version}_${deb_arch}.deb"
+deb="$dist/${pkg_name}-${version}-linux-${deb_arch}.deb"
 rm -f "$deb"
 dpkg-deb --build --root-owner-group "$stage" "$deb"
 

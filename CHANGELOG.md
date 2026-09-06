@@ -6,9 +6,16 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-06
+
 ### 修正
 - macOS/Windows ビルドで `file_dialog_rx` フィールドが未使用となり dead_code
   警告が出ていたのを解消（Linux 限定に条件付けした）。
+
+### 変更
+- PDFium の初期化、描画ワーカー、目次抽出を `pdf_worker` モジュールへ分離。
+- 見開き、先読み、綴じ方向のページ計算を `navigation` モジュールへ分離し、
+  単体テストを追加。
 
 ## [0.1.8] - 2026-07-23
 
@@ -90,7 +97,8 @@
 - 初回リリース。PDF ポータブル ドキュメント リーダー（egui/eframe + pdfium）。
   見開き表示、縦／横綴じ、目次（しおり）、適応解像度の別スレッド描画に対応。
 
-[Unreleased]: https://github.com/fukuyori/pdr/compare/0.1.8...HEAD
+[Unreleased]: https://github.com/fukuyori/pdr/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/fukuyori/pdr/compare/0.1.8...0.2.0
 [0.1.8]: https://github.com/fukuyori/pdr/compare/0.1.7...0.1.8
 [0.1.7]: https://github.com/fukuyori/pdr/compare/0.1.6...0.1.7
 [0.1.6]: https://github.com/fukuyori/pdr/compare/0.1.5...0.1.6

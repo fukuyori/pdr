@@ -8,12 +8,16 @@ use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender};
 
 use eframe::egui;
-use pdfium_render::prelude::*;
 
-use pdr::enhance::{Enhance, apply_enhance};
+use pdr::enhance::Enhance;
+
+use navigation::{Binding, ViewMode};
+use pdf_worker::{RenderCmd, RenderEvt, RenderKey, TocEntry, render_worker};
 
 #[cfg(target_os = "macos")]
 mod macos_open;
+mod navigation;
+mod pdf_worker;
 
 /// テクスチャキャッシュの保持枚数（(ページ,解像度,補正)単位）。
 const CACHE_CAP: usize = 24;
@@ -47,168 +51,11 @@ fn load_app_icon() -> Result<egui::IconData, image::ImageError> {
     })
 }
 
-/// pdfium バインディングを生成する（所有権付き）。描画スレッドで 1 度だけ呼ぶ。
-fn make_pdfium() -> Result<Pdfium, PdfiumError> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            dirs.push(dir.to_path_buf());
-        }
-    }
-    dirs.push(PathBuf::from("."));
-    dirs.push(PathBuf::from("./third_party/pdfium"));
-    dirs.push(PathBuf::from("./lib/bin"));
-
-    for dir in &dirs {
-        let path = Pdfium::pdfium_platform_library_name_at_path(dir);
-        if let Ok(b) = Pdfium::bind_to_library(&path) {
-            return Ok(Pdfium::new(b));
-        }
-    }
-    Pdfium::bind_to_system_library().map(Pdfium::new)
-}
-
-/// 描画キャッシュのキー: (ページ, 描画幅px, 補正)
-type RenderKey = (usize, i32, Enhance);
-
-/// UI→描画スレッドへの指示
-enum RenderCmd {
-    Open { path: PathBuf, doc_gen: u64 },
-    Render {
-        page: usize,
-        width: i32,
-        enhance: Enhance,
-        doc_gen: u64,
-    },
-}
-
-/// 描画スレッド→UIへの結果
-enum RenderEvt {
-    Opened {
-        doc_gen: u64,
-        page_count: usize,
-        toc: Vec<TocEntry>,
-        page_w: f32,
-        page_h: f32,
-    },
-    OpenFailed {
-        doc_gen: u64,
-        msg: String,
-    },
-    Rendered {
-        doc_gen: u64,
-        key: RenderKey,
-        w: usize,
-        h: usize,
-        pixels: Vec<u8>,
-    },
-    /// 致命的エラー（pdfium 初期化失敗など）。世代に関係なく表示する。
-    Fatal(String),
-}
-
-/// 描画スレッド本体。pdfium はここだけが触る。UI スレッドは一切ブロックしない。
-fn render_worker(rx: Receiver<RenderCmd>, tx: Sender<RenderEvt>, ctx: egui::Context) {
-    let pdfium = match make_pdfium() {
-        Ok(p) => p,
-        Err(e) => {
-            log_line(&format!("描画スレッド: pdfium 初期化失敗: {e}"));
-            let _ = tx.send(RenderEvt::Fatal(
-                "pdfium.dll を読み込めませんでした。実行ファイルと同じフォルダに pdfium.dll を置いてください。".to_owned(),
-            ));
-            ctx.request_repaint();
-            return;
-        }
-    };
-    let mut doc: Option<PdfDocument> = None;
-    let mut cur_doc_gen: u64 = 0;
-
-    while let Ok(cmd) = rx.recv() {
-        match cmd {
-            RenderCmd::Open { path, doc_gen } => {
-                cur_doc_gen = doc_gen;
-                doc = None;
-                match pdfium.load_pdf_from_file(&path, None) {
-                    Ok(d) => {
-                        let page_count = d.pages().len() as usize;
-                        let toc = extract_toc(&d);
-                        let (page_w, page_h) = d
-                            .pages()
-                            .get(0)
-                            .map(|p| (p.width().value, p.height().value))
-                            .unwrap_or((595.0, 842.0));
-                        doc = Some(d);
-                        let _ = tx.send(RenderEvt::Opened {
-                            doc_gen,
-                            page_count,
-                            toc,
-                            page_w,
-                            page_h,
-                        });
-                    }
-                    Err(e) => {
-                        let _ = tx.send(RenderEvt::OpenFailed {
-                            doc_gen,
-                            msg: e.to_string(),
-                        });
-                    }
-                }
-                ctx.request_repaint();
-            }
-            RenderCmd::Render {
-                page,
-                width,
-                enhance,
-                doc_gen,
-            } => {
-                if doc_gen != cur_doc_gen {
-                    continue; // 別ドキュメント宛ての古い要求は破棄
-                }
-                let Some(d) = doc.as_ref() else { continue };
-                let Ok(pg) = d.pages().get(page as i32) else {
-                    continue;
-                };
-                let cfg = PdfRenderConfig::new()
-                    .set_target_width(width)
-                    .set_maximum_height(width * 2);
-                let Ok(bmp) = pg.render_with_config(&cfg) else {
-                    continue;
-                };
-                let Ok(img) = bmp.as_image() else { continue };
-                let rgba = apply_enhance(img, enhance).to_rgba8();
-                let (w, h) = (rgba.width() as usize, rgba.height() as usize);
-                let _ = tx.send(RenderEvt::Rendered {
-                    doc_gen,
-                    key: (page, width, enhance),
-                    w,
-                    h,
-                    pixels: rgba.into_raw(),
-                });
-                ctx.request_repaint();
-            }
-        }
-    }
-}
-
 /// 表示幅(px)を刻みに丸めて描画解像度を決める。
 fn bucketize(width_px: f32) -> i32 {
     let w = width_px.ceil().max(0.0) as i32;
     let rounded = ((w + BUCKET_STEP - 1) / BUCKET_STEP) * BUCKET_STEP;
     rounded.clamp(BUCKET_MIN, BUCKET_MAX)
-}
-
-/// 綴じ方向（見開き時の左右配置）
-#[derive(Clone, Copy, PartialEq)]
-enum Binding {
-    /// 左綴じ（横書き・洋書）: 小さいページ番号が左
-    LeftToRight,
-    /// 右綴じ（縦書き・和書）: 小さいページ番号が右
-    RightToLeft,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum ViewMode {
-    Single,
-    Spread,
 }
 
 /// ウィンドウへの合わせ方
@@ -220,13 +67,6 @@ enum FitKind {
     Height,
     /// ページ全体が収まるように合わせる（幅・高さの小さい方。初期表示用）
     Window,
-}
-
-/// 目次(しおり)の 1 項目。PdfBookmark の借用を持たず、所有データだけ保持する。
-struct TocEntry {
-    depth: usize,
-    title: String,
-    page: Option<usize>,
 }
 
 struct PdrApp {
@@ -454,59 +294,27 @@ impl PdrApp {
     /// 指定ページを含む見開きの先頭(最小)ページ番号を返す。
     /// 表紙単独時は [0] [1,2] [3,4]… 、それ以外は [0,1] [2,3]… で組む。
     fn spread_start(&self, page: usize) -> usize {
-        match self.view_mode {
-            ViewMode::Single => page,
-            ViewMode::Spread => {
-                if self.cover_alone {
-                    if page == 0 { 0 } else { ((page - 1) & !1) + 1 }
-                } else {
-                    page & !1
-                }
-            }
-        }
-    }
-
-    /// 見開き先頭 `start` の見開きに含まれるページ番号を昇順で返す。
-    fn pages_of_spread(&self, start: usize) -> Vec<usize> {
-        if self.page_count == 0 {
-            return vec![];
-        }
-        let start = start.min(self.page_count - 1);
-        match self.view_mode {
-            ViewMode::Single => vec![start],
-            ViewMode::Spread => {
-                if self.cover_alone && start == 0 {
-                    return vec![0];
-                }
-                let mut pages = vec![start];
-                if start + 1 < self.page_count {
-                    pages.push(start + 1);
-                }
-                pages
-            }
-        }
+        navigation::spread_start(self.view_mode, self.cover_alone, page)
     }
 
     /// 昇順のページ番号で現在の見開き内容を返す（表示順の反転前）。
     fn current_pages_sorted(&self) -> Vec<usize> {
-        self.pages_of_spread(self.spread_start(self.current))
+        navigation::current_pages_sorted(
+            self.view_mode,
+            self.cover_alone,
+            self.page_count,
+            self.current,
+        )
     }
 
     /// 先読み対象（前後の見開き）のページ番号を返す。
     fn prefetch_targets(&self) -> Vec<usize> {
-        let cur = self.current_pages_sorted();
-        let mut t = Vec::new();
-        if let Some(&last) = cur.last() {
-            if last + 1 < self.page_count {
-                t.extend(self.pages_of_spread(self.spread_start(last + 1)));
-            }
-        }
-        if let Some(&first) = cur.first() {
-            if first > 0 {
-                t.extend(self.pages_of_spread(self.spread_start(first - 1)));
-            }
-        }
-        t
+        navigation::prefetch_targets(
+            self.view_mode,
+            self.cover_alone,
+            self.page_count,
+            self.current,
+        )
     }
 
     /// キャッシュが上限を超えたら、現在ページから遠いものから捨てる。
@@ -549,12 +357,13 @@ impl PdrApp {
 
     /// 現在表示すべきページ番号を左→右の表示順で返す。
     fn visible_pages(&self) -> Vec<usize> {
-        let mut pages = self.current_pages_sorted();
-        // 右綴じ: ページ順を反転して右に若いページを置く
-        if self.binding == Binding::RightToLeft && pages.len() == 2 {
-            pages.reverse();
-        }
-        pages
+        navigation::visible_pages(
+            self.view_mode,
+            self.binding,
+            self.cover_alone,
+            self.page_count,
+            self.current,
+        )
     }
 }
 
@@ -1139,42 +948,6 @@ fn install_japanese_font(ctx: &egui::Context) {
             ctx.set_fonts(fonts);
             return;
         }
-    }
-}
-
-// ---- 目次(しおり)抽出 -------------------------------------------------------
-
-const TOC_MAX_DEPTH: usize = 32;
-const TOC_MAX_ENTRIES: usize = 10000;
-
-/// PDF のしおり(outline)を、深さ付きの平坦なリストに変換する。
-fn extract_toc(doc: &PdfDocument<'_>) -> Vec<TocEntry> {
-    let mut out = Vec::new();
-    let mut node = doc.bookmarks().root();
-    while let Some(n) = node {
-        let next = n.next_sibling();
-        walk_bookmark(n, 0, &mut out);
-        node = next;
-    }
-    out
-}
-
-fn walk_bookmark(node: PdfBookmark<'_>, depth: usize, out: &mut Vec<TocEntry>) {
-    if depth > TOC_MAX_DEPTH || out.len() >= TOC_MAX_ENTRIES {
-        return;
-    }
-    let title = node.title().unwrap_or_default();
-    let page = node
-        .destination()
-        .and_then(|d| d.page_index().ok())
-        .map(|i| i as usize);
-    out.push(TocEntry { depth, title, page });
-
-    let mut child = node.first_child();
-    while let Some(c) = child {
-        let next = c.next_sibling();
-        walk_bookmark(c, depth + 1, out);
-        child = next;
     }
 }
 
