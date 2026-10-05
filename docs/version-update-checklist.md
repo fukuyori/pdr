@@ -2,16 +2,16 @@
 
 ## 今回の更新
 
-- 変更前: `0.2.0`
-- 変更後: `0.2.1`
-- 更新日: 2026-09-06
+- 変更前: `0.2.1`
+- 変更後: `0.3.0`
+- 更新日: 2026-10-05
 
 ## 更新対象
 
 - [x] `Cargo.toml` の `[package].version`
 - [x] `Cargo.lock` の `pdr` パッケージのバージョン
 - [x] `CHANGELOG.md` のリリース見出しと比較リンク
-- [x] `CHANGELOG.md` に0.2.1の画像補正変更を記録
+- [x] `CHANGELOG.md` に0.3.0のページ単位回転機能を記録
 
 ## 変更不要であることを確認する対象
 
@@ -24,9 +24,9 @@
 
 ## 更新後の確認
 
-- [x] `Cargo.lock` の `pdr` パッケージが `0.2.1` である
-- [x] `cargo check` が成功する
-- [x] PowerShell から `cargo test` が成功する
-- [x] `cargo run -- --version` が `PDR 0.2.1` を表示する
+- [x] `Cargo.lock` の `pdr` パッケージが `0.3.0` である
+- [x] `cargo check --offline` が成功する
+- [ ] PowerShell から `cargo test` を実行する（未実施）
+- [x] `cargo run --offline -- --version` が `PDR 0.3.0` を表示する
 - [x] パッケージ作成を行っていない
 - [x] タグ作成、リリース発行を行っていない

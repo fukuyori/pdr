@@ -8,8 +8,8 @@ use pdr::enhance::{Enhance, apply_enhance};
 
 use crate::log_line;
 
-/// 描画キャッシュのキー: (ページ, 描画幅px, 補正)
-pub(crate) type RenderKey = (usize, i32, Enhance);
+/// 描画キャッシュのキー: (ページ, 描画幅px, 補正, 回転角度)
+pub(crate) type RenderKey = (usize, i32, Enhance, i16);
 
 /// UI→描画スレッドへの指示
 pub(crate) enum RenderCmd {
@@ -21,6 +21,7 @@ pub(crate) enum RenderCmd {
         page: usize,
         width: i32,
         enhance: Enhance,
+        rotation: i16,
         doc_gen: u64,
     },
 }
@@ -108,6 +109,7 @@ pub(crate) fn render_worker(rx: Receiver<RenderCmd>, tx: Sender<RenderEvt>, ctx:
                 page,
                 width,
                 enhance,
+                rotation,
                 doc_gen,
             } => {
                 if doc_gen != cur_doc_gen {
@@ -124,11 +126,18 @@ pub(crate) fn render_worker(rx: Receiver<RenderCmd>, tx: Sender<RenderEvt>, ctx:
                     continue;
                 };
                 let Ok(img) = bmp.as_image() else { continue };
-                let rgba = apply_enhance(img, enhance).to_rgba8();
+                let img = apply_enhance(img, enhance);
+                let img = match rotation.rem_euclid(360) {
+                    90 => img.rotate90(),
+                    180 => img.rotate180(),
+                    270 => img.rotate270(),
+                    _ => img,
+                };
+                let rgba = img.to_rgba8();
                 let (w, h) = (rgba.width() as usize, rgba.height() as usize);
                 let _ = tx.send(RenderEvt::Rendered {
                     doc_gen,
-                    key: (page, width, enhance),
+                    key: (page, width, enhance, rotation),
                     w,
                     h,
                     pixels: rgba.into_raw(),

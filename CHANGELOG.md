@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-05
+
+### 追加
+- ページ画像の右クリックメニューから、選択したページだけを90°、180°、−90°回転できるようにした。
+- 回転は表示中だけ適用し、元のPDFファイルは変更しない。別ページへ移動すると回転状態をリセットする。
+
 ## [0.2.1] - 2026-09-06
 
 ### 追加
@@ -107,7 +113,8 @@
 - 初回リリース。PDF ポータブル ドキュメント リーダー（egui/eframe + pdfium）。
   見開き表示、縦／横綴じ、目次（しおり）、適応解像度の別スレッド描画に対応。
 
-[Unreleased]: https://github.com/fukuyori/pdr/compare/0.2.1...HEAD
+[Unreleased]: https://github.com/fukuyori/pdr/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/fukuyori/pdr/compare/0.2.1...0.3.0
 [0.2.1]: https://github.com/fukuyori/pdr/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/fukuyori/pdr/compare/0.1.8...0.2.0
 [0.1.8]: https://github.com/fukuyori/pdr/compare/0.1.7...0.1.8

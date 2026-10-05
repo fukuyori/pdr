@@ -97,6 +97,8 @@ struct PdrApp {
     recent: Vec<PathBuf>,
     /// 描画済みテクスチャのキャッシュ（描画スレッドの結果で埋まる）
     cache: HashMap<RenderKey, egui::TextureHandle>,
+    /// 現在表示中のページに限った一時回転角度（度）。ページ移動で破棄する。
+    rotations: HashMap<usize, i16>,
     /// 描画スレッドに依頼済みで未着のキー（重複依頼を防ぐ）
     requested: HashSet<RenderKey>,
     /// 直近フレームの描画解像度（先読み依頼で使う）
@@ -129,6 +131,7 @@ impl PdrApp {
             toc_width: TOC_WIDTH_DEFAULT,
             recent: load_recent(),
             cache: HashMap::new(),
+            rotations: HashMap::new(),
             requested: HashSet::new(),
             cur_bucket: BUCKET_MIN,
             doc_gen: 0,
@@ -146,6 +149,7 @@ impl PdrApp {
         self.current = 0;
         self.toc.clear();
         self.cache.clear();
+        self.rotations.clear();
         self.requested.clear();
         self.fit_ref = FitKind::Window; // 開いたら全体表示
         self.zoom = 1.0;
@@ -280,6 +284,7 @@ impl PdrApp {
             page: key.0,
             width: key.1,
             enhance: key.2,
+            rotation: key.3,
             doc_gen: self.doc_gen,
         });
     }
@@ -290,18 +295,22 @@ impl PdrApp {
             return;
         }
         self.enhance = self.enhance_draft;
-        self.cache.retain(|(_, _, enhance), _| *enhance == self.enhance);
+        self.cache
+            .retain(|(_, _, enhance, _), _| *enhance == self.enhance);
     }
 
     /// 表示に使えるテクスチャを返す。完全一致が無ければ、同じページの別解像度を
     /// 暫定表示として返す（描き上がるまでのつなぎ。多少ぼやける）。
-    fn display_texture(&self, page: usize) -> Option<egui::TextureHandle> {
-        if let Some(t) = self.cache.get(&(page, self.cur_bucket, self.enhance)) {
+    fn display_texture(&self, page: usize, rotation: i16) -> Option<egui::TextureHandle> {
+        if let Some(t) = self
+            .cache
+            .get(&(page, self.cur_bucket, self.enhance, rotation))
+        {
             return Some(t.clone());
         }
         self.cache
             .iter()
-            .filter(|((p, _, e), _)| *p == page && *e == self.enhance)
+            .filter(|((p, _, e, r), _)| *p == page && *e == self.enhance && *r == rotation)
             .map(|(_, t)| t.clone())
             .next()
     }
@@ -339,7 +348,7 @@ impl PdrApp {
         }
         let cur = self.current as isize;
         let mut keys: Vec<RenderKey> = self.cache.keys().copied().collect();
-        keys.sort_by_key(|(p, _, _)| (*p as isize - cur).abs());
+        keys.sort_by_key(|(p, _, _, _)| (*p as isize - cur).abs());
         for k in keys.into_iter().skip(CACHE_CAP) {
             self.cache.remove(&k);
         }
@@ -349,7 +358,7 @@ impl PdrApp {
         if let Some(&last) = self.current_pages_sorted().last() {
             let target = last + 1;
             if target < self.page_count {
-                self.current = self.spread_start(target);
+                self.set_current(self.spread_start(target));
             }
         }
     }
@@ -357,7 +366,7 @@ impl PdrApp {
     fn prev(&mut self) {
         let start = self.spread_start(self.current);
         if start > 0 {
-            self.current = self.spread_start(start - 1);
+            self.set_current(self.spread_start(start - 1));
         }
     }
 
@@ -367,7 +376,19 @@ impl PdrApp {
             return;
         }
         let p = page.min(self.page_count - 1);
-        self.current = self.spread_start(p);
+        self.set_current(self.spread_start(p));
+    }
+
+    fn set_current(&mut self, page: usize) {
+        if self.current != page {
+            self.current = page;
+            self.rotations.clear();
+        }
+    }
+
+    fn rotate_page(&mut self, page: usize, delta: i16) {
+        let rotation = self.rotations.entry(page).or_insert(0);
+        *rotation = (*rotation + delta).rem_euclid(360);
     }
 
     /// 現在表示すべきページ番号を左→右の表示順で返す。
@@ -438,6 +459,7 @@ impl eframe::App for PdrApp {
         // クロージャ内では self を借用するため、操作は一旦ためてから後で適用する
         let mut open_path: Option<PathBuf> = None;
         let mut goto_page: Option<usize> = None;
+        let mut page_rotations: Vec<(usize, i16)> = Vec::new();
 
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -701,8 +723,20 @@ impl eframe::App for PdrApp {
                 avail.x
             };
 
-            // ページのアスペクト比（高さ/幅）から、表示サイズ(pt)を直接求める。
-            let aspect = (self.page_size.1 / self.page_size.0).max(0.01);
+            // 90/270度回転したページは縦横比を入れ替えて表示する。
+            let aspects: Vec<f32> = pages
+                .iter()
+                .map(|page| {
+                    let rotation = self.rotations.get(page).copied().unwrap_or(0);
+                    let (w, h) = if rotation.rem_euclid(180) == 90 {
+                        (self.page_size.1, self.page_size.0)
+                    } else {
+                        self.page_size
+                    };
+                    (h / w).max(0.01)
+                })
+                .collect();
+            let aspect = aspects.iter().copied().fold(0.01_f32, f32::max);
             let fit_w = per_w.max(1.0); // 横に合わせたときの表示幅(pt)
             let fit_h = (avail.y / aspect).max(1.0); // 縦に合わせたときの表示幅(pt)
             let ref_w = match self.fit_ref {
@@ -711,8 +745,6 @@ impl eframe::App for PdrApp {
                 FitKind::Window => fit_w.min(fit_h),
             };
             let disp_w = (ref_w * self.zoom).max(1.0);
-            let disp = egui::vec2(disp_w, disp_w * aspect);
-
             // 表示幅から必要な描画解像度(px)を決め、刻みに丸める（=適応解像度）。
             let bucket = bucketize(disp_w * ctx.pixels_per_point());
             self.cur_bucket = bucket;
@@ -723,17 +755,21 @@ impl eframe::App for PdrApp {
                 .scroll_source(egui::scroll_area::ScrollSource::ALL)
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
-                        for &idx in &pages {
+                        for (position, &idx) in pages.iter().enumerate() {
                             let enhance = self.enhance;
-                            self.request_render((idx, bucket, enhance));
-                            match self.display_texture(idx) {
-                                Some(tex) => {
-                                    ui.add(egui::Image::new(&tex).fit_to_exact_size(disp));
-                                }
+                            let rotation = self.rotations.get(&idx).copied().unwrap_or(0);
+                            self.request_render((idx, bucket, enhance, rotation));
+                            let size = egui::vec2(disp_w, disp_w * aspects[position]);
+                            let response = match self.display_texture(idx, rotation) {
+                                Some(tex) => ui.add(
+                                    egui::Image::new(&tex)
+                                        .fit_to_exact_size(size)
+                                        .sense(egui::Sense::click()),
+                                ),
                                 None => {
                                     // 描き上がるまでのプレースホルダ
-                                    let (rect, _) =
-                                        ui.allocate_exact_size(disp, egui::Sense::hover());
+                                    let (rect, response) =
+                                        ui.allocate_exact_size(size, egui::Sense::click());
                                     ui.painter().rect_filled(
                                         rect,
                                         2.0,
@@ -746,14 +782,38 @@ impl eframe::App for PdrApp {
                                         egui::FontId::proportional(28.0),
                                         egui::Color32::from_gray(130),
                                     );
+                                    response
                                 }
-                            }
+                            };
+                            response.context_menu(|ui| {
+                                ui.label(format!("{} ページを回転", idx + 1));
+                                ui.separator();
+                                if ui.button("時計回りに 90°").clicked() {
+                                    page_rotations.push((idx, 90));
+                                    ui.close();
+                                }
+                                if ui.button("180° 回転").clicked() {
+                                    page_rotations.push((idx, 180));
+                                    ui.close();
+                                }
+                                if ui.button("反時計回りに 90°").clicked() {
+                                    page_rotations.push((idx, -90));
+                                    ui.close();
+                                }
+                            });
                         }
                     });
                 });
 
             Some((fit_w, fit_h))
         });
+
+        if !page_rotations.is_empty() {
+            for (page, delta) in page_rotations {
+                self.rotate_page(page, delta);
+            }
+            ctx.request_repaint();
+        }
 
         // トラックパッドのピンチ（および Ctrl+ホイール）で表示倍率を増減（ポインタが本文
         // 領域にあるときだけ）。二本指スクロールはパンに使うのでズームには使わない。
@@ -867,7 +927,7 @@ impl eframe::App for PdrApp {
             let enhance = self.enhance;
             let bucket = self.cur_bucket;
             for idx in self.prefetch_targets() {
-                self.request_render((idx, bucket, enhance));
+                self.request_render((idx, bucket, enhance, 0));
             }
             self.evict_cache();
         }
