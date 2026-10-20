@@ -3,11 +3,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, OnceLock};
 
 use eframe::egui;
+use serde::{Deserialize, Serialize};
 
 use pdr::enhance::Enhance;
 
@@ -18,6 +20,14 @@ use pdf_worker::{RenderCmd, RenderEvt, RenderKey, TocEntry, render_worker};
 mod macos_open;
 mod navigation;
 mod pdf_worker;
+mod text_selection;
+mod translation;
+
+#[derive(Clone)]
+struct RenderedPage {
+    texture: egui::TextureHandle,
+    characters: Arc<Vec<text_selection::TextCharacter>>,
+}
 
 /// テクスチャキャッシュの保持枚数（(ページ,解像度,補正)単位）。
 const CACHE_CAP: usize = 24;
@@ -35,6 +45,74 @@ const TOC_WIDTH_DEFAULT: f32 = 280.0;
 const TOC_WIDTH_MIN: f32 = 160.0;
 const TOC_WIDTH_MAX: f32 = 700.0;
 const TOC_WIDTH_STEP: f32 = 40.0;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+struct SavedSettings {
+    view_mode: String,
+    binding: String,
+    cover_alone: bool,
+    enhance_contrast: u8,
+    enhance_sharpen: u8,
+    enhance_auto_level: bool,
+    enhance_binarize: bool,
+    toc_width: f32,
+}
+
+impl Default for SavedSettings {
+    fn default() -> Self {
+        Self {
+            view_mode: "spread".into(),
+            binding: "left-to-right".into(),
+            cover_alone: true,
+            enhance_contrast: 0,
+            enhance_sharpen: 0,
+            enhance_auto_level: false,
+            enhance_binarize: false,
+            toc_width: TOC_WIDTH_DEFAULT,
+        }
+    }
+}
+
+impl SavedSettings {
+    fn load() -> Self {
+        settings_file()
+            .and_then(|path| fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self) {
+        let Some(path) = settings_file() else {
+            return;
+        };
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            fs::create_dir_all(path.parent().unwrap())?;
+            fs::write(path, serde_json::to_vec_pretty(self)?)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            log_line(&format!("設定の保存に失敗: {error}"));
+        }
+    }
+}
+
+fn config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    let base =
+        std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Application Support"));
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")));
+    base.map(|path| path.join("pdr"))
+}
+
+fn settings_file() -> Option<PathBuf> {
+    config_dir().map(|path| path.join("settings.json"))
+}
 
 fn load_app_icon() -> Result<egui::IconData, image::ImageError> {
     #[cfg(target_os = "windows")]
@@ -96,7 +174,10 @@ struct PdrApp {
     /// 最近開いたファイル（先頭が最新）
     recent: Vec<PathBuf>,
     /// 描画済みテクスチャのキャッシュ（描画スレッドの結果で埋まる）
-    cache: HashMap<RenderKey, egui::TextureHandle>,
+    cache: HashMap<RenderKey, RenderedPage>,
+    selection: text_selection::TextSelection,
+    context_selection: Option<(usize, String)>,
+    translation: translation::TranslationWindow,
     /// 現在表示中のページに限った一時回転角度（度）。ページ移動で破棄する。
     rotations: HashMap<usize, i16>,
     /// 描画スレッドに依頼済みで未着のキー（重複依頼を防ぐ）
@@ -112,25 +193,51 @@ struct PdrApp {
     #[cfg(target_os = "linux")]
     file_dialog_rx: Option<Receiver<Option<PathBuf>>>,
     status: String,
+    saved_settings: SavedSettings,
+    last_saved_settings: String,
 }
 
 impl PdrApp {
-    fn new(to_worker: Sender<RenderCmd>, from_worker: Receiver<RenderEvt>) -> Self {
+    fn new(
+        to_worker: Sender<RenderCmd>,
+        from_worker: Receiver<RenderEvt>,
+        settings: SavedSettings,
+    ) -> Self {
+        let view_mode = if settings.view_mode == "single" {
+            ViewMode::Single
+        } else {
+            ViewMode::Spread
+        };
+        let binding = if settings.binding == "right-to-left" {
+            Binding::RightToLeft
+        } else {
+            Binding::LeftToRight
+        };
+        let enhance = Enhance {
+            contrast: settings.enhance_contrast.min(100),
+            sharpen: settings.enhance_sharpen.min(100),
+            auto_level: settings.enhance_auto_level,
+            binarize: settings.enhance_binarize,
+        };
+        let last_saved_settings = serde_json::to_string(&settings).unwrap_or_default();
         Self {
             page_count: 0,
             page_size: (595.0, 842.0),
             current: 0,
-            view_mode: ViewMode::Spread,
-            binding: Binding::LeftToRight,
-            cover_alone: true,
+            view_mode,
+            binding,
+            cover_alone: settings.cover_alone,
             fit_ref: FitKind::Window,
             zoom: 1.0,
-            enhance: Enhance::NONE,
-            enhance_draft: Enhance::NONE,
+            enhance,
+            enhance_draft: enhance,
             toc: Vec::new(),
-            toc_width: TOC_WIDTH_DEFAULT,
-            recent: load_recent(),
+            toc_width: settings.toc_width.clamp(TOC_WIDTH_MIN, TOC_WIDTH_MAX),
+            recent: Vec::new(),
             cache: HashMap::new(),
+            selection: text_selection::TextSelection::default(),
+            context_selection: None,
+            translation: translation::TranslationWindow::default(),
             rotations: HashMap::new(),
             requested: HashSet::new(),
             cur_bucket: BUCKET_MIN,
@@ -140,6 +247,8 @@ impl PdrApp {
             #[cfg(target_os = "linux")]
             file_dialog_rx: None,
             status: "ファイルを開いてください".to_owned(),
+            saved_settings: settings,
+            last_saved_settings,
         }
     }
 
@@ -149,6 +258,8 @@ impl PdrApp {
         self.current = 0;
         self.toc.clear();
         self.cache.clear();
+        self.selection.clear();
+        self.context_selection = None;
         self.rotations.clear();
         self.requested.clear();
         self.fit_ref = FitKind::Window; // 開いたら全体表示
@@ -169,7 +280,6 @@ impl PdrApp {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_path_buf());
         self.recent.truncate(12);
-        save_recent(&self.recent);
     }
 
     /// 描画スレッドからの結果を取り込む（毎フレーム冒頭で呼ぶ）。
@@ -197,6 +307,7 @@ impl PdrApp {
                     w,
                     h,
                     pixels,
+                    characters,
                 } if doc_gen == self.doc_gen => {
                     self.requested.remove(&key);
                     if key.2 != self.enhance {
@@ -208,7 +319,13 @@ impl PdrApp {
                         color,
                         egui::TextureOptions::LINEAR,
                     );
-                    self.cache.insert(key, tex);
+                    self.cache.insert(
+                        key,
+                        RenderedPage {
+                            texture: tex,
+                            characters: Arc::new(characters),
+                        },
+                    );
                 }
                 RenderEvt::Fatal(msg) => {
                     self.status = msg;
@@ -238,11 +355,14 @@ impl PdrApp {
 
     #[cfg(target_os = "linux")]
     fn take_file_dialog_result(&mut self) -> Option<Option<PathBuf>> {
-        let result = self.file_dialog_rx.as_ref().and_then(|rx| match rx.try_recv() {
-            Ok(path) => Some(path),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
-            Err(std::sync::mpsc::TryRecvError::Empty) => None,
-        });
+        let result = self
+            .file_dialog_rx
+            .as_ref()
+            .and_then(|rx| match rx.try_recv() {
+                Ok(path) => Some(path),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(None),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            });
         if result.is_some() {
             self.file_dialog_rx = None;
         }
@@ -301,7 +421,7 @@ impl PdrApp {
 
     /// 表示に使えるテクスチャを返す。完全一致が無ければ、同じページの別解像度を
     /// 暫定表示として返す（描き上がるまでのつなぎ。多少ぼやける）。
-    fn display_texture(&self, page: usize, rotation: i16) -> Option<egui::TextureHandle> {
+    fn display_texture(&self, page: usize, rotation: i16) -> Option<RenderedPage> {
         if let Some(t) = self
             .cache
             .get(&(page, self.cur_bucket, self.enhance, rotation))
@@ -383,6 +503,8 @@ impl PdrApp {
         if self.current != page {
             self.current = page;
             self.rotations.clear();
+            self.selection.clear();
+            self.context_selection = None;
         }
     }
 
@@ -400,6 +522,34 @@ impl PdrApp {
             self.page_count,
             self.current,
         )
+    }
+}
+
+impl PdrApp {
+    fn save_display_settings(&mut self) {
+        self.saved_settings.view_mode = match self.view_mode {
+            ViewMode::Single => "single",
+            ViewMode::Spread => "spread",
+        }
+        .into();
+        self.saved_settings.binding = match self.binding {
+            Binding::LeftToRight => "left-to-right",
+            Binding::RightToLeft => "right-to-left",
+        }
+        .into();
+        self.saved_settings.cover_alone = self.cover_alone;
+        self.saved_settings.enhance_contrast = self.enhance.contrast;
+        self.saved_settings.enhance_sharpen = self.enhance.sharpen;
+        self.saved_settings.enhance_auto_level = self.enhance.auto_level;
+        self.saved_settings.enhance_binarize = self.enhance.binarize;
+        self.saved_settings.toc_width = self.toc_width;
+        let Ok(snapshot) = serde_json::to_string(&self.saved_settings) else {
+            return;
+        };
+        if snapshot != self.last_saved_settings {
+            self.saved_settings.save();
+            self.last_saved_settings = snapshot;
+        }
     }
 }
 
@@ -428,7 +578,11 @@ impl eframe::App for PdrApp {
 
         let mut go_next = false;
         let mut go_prev = false;
+        let editing_text = ctx.egui_wants_keyboard_input();
         ctx.input(|i| {
+            if editing_text {
+                return;
+            }
             if i.key_pressed(egui::Key::PageDown)
                 || i.key_pressed(egui::Key::ArrowDown)
                 || i.key_pressed(egui::Key::Space)
@@ -463,6 +617,9 @@ impl eframe::App for PdrApp {
 
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
+                if ui.button("翻訳設定").clicked() {
+                    self.translation.open = true;
+                }
                 if ui.button("📂 開く").clicked() {
                     #[cfg(target_os = "linux")]
                     self.start_file_dialog(ctx.clone());
@@ -654,7 +811,11 @@ impl eframe::App for PdrApp {
                         if ui.small_button("＋").on_hover_text("幅を広く").clicked() {
                             self.toc_width = (self.toc_width + TOC_WIDTH_STEP).min(TOC_WIDTH_MAX);
                         }
-                        if ui.small_button("標準").on_hover_text("標準幅に戻す").clicked() {
+                        if ui
+                            .small_button("標準")
+                            .on_hover_text("標準幅に戻す")
+                            .clicked()
+                        {
                             self.toc_width = TOC_WIDTH_DEFAULT;
                         }
                     });
@@ -749,11 +910,40 @@ impl eframe::App for PdrApp {
             let bucket = bucketize(disp_w * ctx.pixels_per_point());
             self.cur_bucket = bucket;
 
-            // 二本指スクロール(ホイール)・スクロールバー・ドラッグでパン(移動)する。
+            // プライマリドラッグは文字選択、セカンダリドラッグはパン。
             // 拡大縮小はピンチ(および Ctrl+ホイール)のみで行う。
-            egui::ScrollArea::both()
-                .scroll_source(egui::scroll_area::ScrollSource::ALL)
+            let mut pan = egui::Vec2::ZERO;
+            let scroll = egui::ScrollArea::both()
+                .scroll_source(
+                    egui::scroll_area::ScrollSource::SCROLL_BAR
+                        | egui::scroll_area::ScrollSource::MOUSE_WHEEL,
+                )
                 .show(ui, |ui| {
+                    // Register the background first so page widgets take precedence.
+                    let background = ui.interact(
+                        ui.clip_rect(),
+                        ui.id().with("page-background"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    pan += text_selection::secondary_pan(&background);
+                    if background.clicked_by(egui::PointerButton::Primary) {
+                        self.selection.clear();
+                        self.context_selection = None;
+                    }
+                    if self.context_selection.is_some() {
+                        background.context_menu(|ui| {
+                            if let Some((_, text)) = &self.context_selection {
+                                if ui.button("コピー").clicked() {
+                                    ctx.copy_text(text.clone());
+                                    ui.close();
+                                }
+                                if ui.button("翻訳").clicked() {
+                                    self.translation.open_text(text.clone(), &ctx);
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                     ui.horizontal_top(|ui| {
                         for (position, &idx) in pages.iter().enumerate() {
                             let enhance = self.enhance;
@@ -761,15 +951,31 @@ impl eframe::App for PdrApp {
                             self.request_render((idx, bucket, enhance, rotation));
                             let size = egui::vec2(disp_w, disp_w * aspects[position]);
                             let response = match self.display_texture(idx, rotation) {
-                                Some(tex) => ui.add(
-                                    egui::Image::new(&tex)
-                                        .fit_to_exact_size(size)
-                                        .sense(egui::Sense::click()),
-                                ),
+                                Some(rendered) => {
+                                    let response = ui.add(
+                                        egui::Image::new(&rendered.texture)
+                                            .fit_to_exact_size(size)
+                                            .sense(egui::Sense::click_and_drag()),
+                                    );
+                                    self.selection.interact(
+                                        ui,
+                                        &response,
+                                        idx,
+                                        &rendered.characters,
+                                    );
+                                    if let Some(text) =
+                                        self.selection.selected_text(idx, &rendered.characters)
+                                    {
+                                        self.context_selection = Some((idx, text));
+                                    } else if !self.selection.has_selection() {
+                                        self.context_selection = None;
+                                    }
+                                    response
+                                }
                                 None => {
                                     // 描き上がるまでのプレースホルダ
                                     let (rect, response) =
-                                        ui.allocate_exact_size(size, egui::Sense::click());
+                                        ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                                     ui.painter().rect_filled(
                                         rect,
                                         2.0,
@@ -785,7 +991,19 @@ impl eframe::App for PdrApp {
                                     response
                                 }
                             };
+                            pan += text_selection::secondary_pan(&response);
                             response.context_menu(|ui| {
+                                if let Some((_, text)) = &self.context_selection {
+                                    if ui.button("コピー").clicked() {
+                                        ctx.copy_text(text.clone());
+                                        ui.close();
+                                    }
+                                    if ui.button("翻訳").clicked() {
+                                        self.translation.open_text(text.clone(), &ctx);
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                }
                                 ui.label(format!("{} ページを回転", idx + 1));
                                 ui.separator();
                                 if ui.button("時計回りに 90°").clicked() {
@@ -804,6 +1022,14 @@ impl eframe::App for PdrApp {
                         }
                     });
                 });
+            if pan != egui::Vec2::ZERO {
+                let mut state = scroll.state;
+                let max_offset =
+                    (scroll.content_size - scroll.inner_rect.size()).max(egui::Vec2::ZERO);
+                state.offset = (state.offset - pan).clamp(egui::Vec2::ZERO, max_offset);
+                state.store(&ctx, scroll.id);
+                ctx.request_repaint();
+            }
 
             Some((fit_w, fit_h))
         });
@@ -922,6 +1148,7 @@ impl eframe::App for PdrApp {
         }
 
         // 先読み: 前後の見開きを現在の解像度で描画スレッドに依頼しておく。
+        self.translation.show(&ctx);
         // 描画は別スレッドなので UI はブロックされず、めくった瞬間はキャッシュ表示になる。
         if self.page_count > 0 {
             let enhance = self.enhance;
@@ -931,6 +1158,8 @@ impl eframe::App for PdrApp {
             }
             self.evict_cache();
         }
+
+        self.save_display_settings();
     }
 }
 
@@ -962,6 +1191,7 @@ fn main() -> eframe::Result<()> {
     #[cfg(not(target_os = "linux"))]
     let window_title = "PDR - ポータブル・ドキュメント・リーダー";
 
+    let settings = SavedSettings::load();
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1200.0, 850.0])
         .with_title(window_title);
@@ -1009,13 +1239,17 @@ fn main() -> eframe::Result<()> {
                 .spawn(move || render_worker(cmd_rx, evt_tx, worker_ctx))
                 .expect("描画スレッド起動失敗");
 
-            let mut app = PdrApp::new(cmd_tx, evt_rx);
+            let mut app = PdrApp::new(cmd_tx, evt_rx, settings);
             // 引数で PDF パスが渡されたら起動時に開く（pdr.exe <path.pdf>）
             let argv: Vec<String> = std::env::args().collect();
             log_line(&format!("argv = {argv:?}"));
             if let Some(arg) = argv.get(1) {
                 let path = PathBuf::from(arg);
-                log_line(&format!("arg path={} is_file={}", path.display(), path.is_file()));
+                log_line(&format!(
+                    "arg path={} is_file={}",
+                    path.display(),
+                    path.is_file()
+                ));
                 if path.is_file() {
                     app.open_path(&path);
                 } else {
@@ -1067,13 +1301,6 @@ fn install_japanese_font(ctx: &egui::Context) {
     }
 }
 
-// ---- 最近開いたファイル -----------------------------------------------------
-
-/// 履歴ファイルのパス（%APPDATA%\pdr\recent.txt）。
-fn config_file() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("pdr").join("recent.txt"))
-}
-
 /// ログファイルのパス（%APPDATA%\pdr\pdr.log）。
 fn log_path() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("pdr").join("pdr.log"))
@@ -1100,33 +1327,4 @@ fn log_line(msg: &str) {
     {
         let _ = writeln!(f, "[{elapsed:>8}ms] {msg}");
     }
-}
-
-fn load_recent() -> Vec<PathBuf> {
-    let Some(f) = config_file() else {
-        return Vec::new();
-    };
-    match std::fs::read_to_string(&f) {
-        Ok(s) => s
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(PathBuf::from)
-            .collect(),
-        Err(_) => Vec::new(),
-    }
-}
-
-fn save_recent(recent: &[PathBuf]) {
-    let Some(f) = config_file() else {
-        return;
-    };
-    if let Some(dir) = f.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let body = recent
-        .iter()
-        .filter_map(|p| p.to_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let _ = std::fs::write(&f, body);
 }

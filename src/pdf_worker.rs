@@ -7,6 +7,7 @@ use pdfium_render::prelude::*;
 use pdr::enhance::{Enhance, apply_enhance};
 
 use crate::log_line;
+use crate::text_selection::{TextCharacter, rotate_rect};
 
 /// 描画キャッシュのキー: (ページ, 描画幅px, 補正, 回転角度)
 pub(crate) type RenderKey = (usize, i32, Enhance, i16);
@@ -45,6 +46,7 @@ pub(crate) enum RenderEvt {
         w: usize,
         h: usize,
         pixels: Vec<u8>,
+        characters: Vec<TextCharacter>,
     },
     /// 致命的エラー（pdfium 初期化失敗など）。世代に関係なく表示する。
     Fatal(String),
@@ -126,6 +128,46 @@ pub(crate) fn render_worker(rx: Receiver<RenderCmd>, tx: Sender<RenderEvt>, ctx:
                     continue;
                 };
                 let Ok(img) = bmp.as_image() else { continue };
+                // Use PDFium's own page-to-device mapping so crop boxes and intrinsic
+                // page rotation follow exactly the same transform as the bitmap.
+                let characters = pg
+                    .text()
+                    .map(|text| {
+                        text.chars()
+                            .iter()
+                            .filter_map(|ch| {
+                                let text = ch.unicode_char()?;
+                                if text.is_control() && !matches!(text, '\r' | '\n' | '\t') {
+                                    return None;
+                                }
+                                let bounds = (|| {
+                                    let bounds = ch.tight_bounds().ok()?;
+                                    let (x0, y0) = pg
+                                        .points_to_pixels(bounds.left(), bounds.top(), &cfg)
+                                        .ok()?;
+                                    let (x1, y1) = pg
+                                        .points_to_pixels(bounds.right(), bounds.bottom(), &cfg)
+                                        .ok()?;
+                                    let rect = egui::Rect::from_two_pos(
+                                        egui::pos2(
+                                            x0 as f32 / img.width() as f32,
+                                            y0 as f32 / img.height() as f32,
+                                        ),
+                                        egui::pos2(
+                                            x1 as f32 / img.width() as f32,
+                                            y1 as f32 / img.height() as f32,
+                                        ),
+                                    );
+                                    (rect.is_finite()
+                                        && bounds.width().value > 0.0
+                                        && bounds.height().value > 0.0)
+                                        .then(|| rotate_rect(rect, rotation))
+                                })();
+                                Some(TextCharacter { text, bounds })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let img = apply_enhance(img, enhance);
                 let img = match rotation.rem_euclid(360) {
                     90 => img.rotate90(),
@@ -141,6 +183,7 @@ pub(crate) fn render_worker(rx: Receiver<RenderCmd>, tx: Sender<RenderEvt>, ctx:
                     w,
                     h,
                     pixels: rgba.into_raw(),
+                    characters,
                 });
                 ctx.request_repaint();
             }
