@@ -45,6 +45,7 @@ const TOC_WIDTH_DEFAULT: f32 = 280.0;
 const TOC_WIDTH_MIN: f32 = 160.0;
 const TOC_WIDTH_MAX: f32 = 700.0;
 const TOC_WIDTH_STEP: f32 = 40.0;
+const RECENT_FILES_LIMIT: usize = 12;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -112,6 +113,53 @@ fn config_dir() -> Option<PathBuf> {
 
 fn settings_file() -> Option<PathBuf> {
     config_dir().map(|path| path.join("settings.json"))
+}
+
+fn recent_files_file() -> Option<PathBuf> {
+    config_dir().map(|path| path.join("recent_files.json"))
+}
+
+fn load_recent_files() -> Vec<PathBuf> {
+    let Some(path) = recent_files_file() else {
+        return Vec::new();
+    };
+    load_recent_files_from(&path)
+}
+
+fn load_recent_files_from(path: &Path) -> Vec<PathBuf> {
+    let Ok(bytes) = fs::read(path) else {
+        return Vec::new();
+    };
+    let Ok(paths) = serde_json::from_slice::<Vec<PathBuf>>(&bytes) else {
+        return Vec::new();
+    };
+
+    let mut recent = Vec::with_capacity(paths.len().min(RECENT_FILES_LIMIT));
+    for path in paths {
+        if !recent.contains(&path) {
+            recent.push(path);
+            if recent.len() == RECENT_FILES_LIMIT {
+                break;
+            }
+        }
+    }
+    recent
+}
+
+fn save_recent_files(paths: &[PathBuf]) {
+    let Some(path) = recent_files_file() else {
+        return;
+    };
+    let result = save_recent_files_to(&path, paths);
+    if let Err(error) = result {
+        log_line(&format!("履歴の保存に失敗: {error}"));
+    }
+}
+
+fn save_recent_files_to(path: &Path, paths: &[PathBuf]) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(path, serde_json::to_vec_pretty(paths)?)?;
+    Ok(())
 }
 
 fn load_app_icon() -> Result<egui::IconData, image::ImageError> {
@@ -233,7 +281,7 @@ impl PdrApp {
             enhance_draft: enhance,
             toc: Vec::new(),
             toc_width: settings.toc_width.clamp(TOC_WIDTH_MIN, TOC_WIDTH_MAX),
-            recent: Vec::new(),
+            recent: load_recent_files(),
             cache: HashMap::new(),
             selection: text_selection::TextSelection::default(),
             context_selection: None,
@@ -279,7 +327,8 @@ impl PdrApp {
     fn push_recent(&mut self, path: &Path) {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_path_buf());
-        self.recent.truncate(12);
+        self.recent.truncate(RECENT_FILES_LIMIT);
+        save_recent_files(&self.recent);
     }
 
     /// 描画スレッドからの結果を取り込む（毎フレーム冒頭で呼ぶ）。
@@ -789,7 +838,15 @@ impl eframe::App for PdrApp {
                     ui.label(label);
                 });
             }
-            ui.label(&self.status);
+            ui.horizontal(|ui| {
+                ui.label(&self.status);
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
+                    },
+                );
+            });
         });
 
         // 左の目次パネル（しおりのある PDF でのみ自動表示）。
@@ -1326,5 +1383,30 @@ fn log_line(msg: &str) {
         .open(&path)
     {
         let _ = writeln!(f, "[{elapsed:>8}ms] {msg}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_recent_files_from, save_recent_files_to};
+    use std::path::PathBuf;
+
+    #[test]
+    fn recent_file_history_is_saved_loaded_deduplicated_and_limited() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "target/recent-history-test-{}.json",
+            std::process::id()
+        ));
+        let mut paths = vec![PathBuf::from("first.pdf"), PathBuf::from("first.pdf")];
+        paths.extend((2..=14).map(|index| PathBuf::from(format!("file-{index}.pdf"))));
+
+        save_recent_files_to(&path, &paths).expect("save recent files");
+        let loaded = load_recent_files_from(&path);
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(loaded.len(), 12);
+        assert_eq!(loaded[0], PathBuf::from("first.pdf"));
+        assert_eq!(loaded[1], PathBuf::from("file-2.pdf"));
+        assert_eq!(loaded[11], PathBuf::from("file-12.pdf"));
     }
 }

@@ -15,7 +15,7 @@ A Rust desktop PDF viewer built with egui/eframe and PDFium. It supports single-
 - **Zoom**: use the mouse wheel. The view snaps to fit-width or fit-height and follows window resizing.
 - **Image enhancement**: per-page auto-level correction, adjustable contrast and unsharp mask, and Otsu binarization for scanned PDFs
 - **Fast rendering**: render pages on a background thread without blocking the UI, with resolution adapted to the display size and adjacent-page prefetching
-- **Settings restore**: display mode, page binding, standalone cover, image enhancement, table-of-contents width, and translation settings are restored at the next launch. PDR starts with a blank page and does not restore the previous PDF, page position, temporary rotation, text selection, fit mode, or zoom level.
+- **Settings restore**: display mode, page binding, standalone cover, image enhancement, table-of-contents width, translation settings, and the list of recently opened PDFs are restored at the next launch. PDR starts with a blank page; it does not automatically reopen a PDF or restore page position, temporary rotation, text selection, fit mode, or zoom level. Select a file from **History** to open it.
 
 ## Ollama translation
 
@@ -61,6 +61,8 @@ Display settings are saved in:
 - macOS: `~/Library/Application Support/pdr/settings.json`
 - Linux: `$XDG_CONFIG_HOME/pdr/settings.json` (or `~/.config/pdr/settings.json` when unset)
 
+The list of up to 12 recently opened PDFs is saved in `recent_files.json` in the same configuration folder. PDR loads the list at startup but does not open any of those files automatically.
+
 ## Requirements
 
 - Rust (stable, MSVC on Windows)
@@ -98,6 +100,8 @@ scripts/package-deb.sh --download-pdfium
 The output is `dist/pdr_<version>_<arch>.deb`. If `third_party/pdfium/libpdfium.so` is already present, omit `--download-pdfium`. To use an existing build, pass `--no-build` to `scripts/package-deb.sh`.
 
 ## Install on Windows and add PDR to PATH
+
+The Inno Setup installer offers an unchecked **Add PDR to PATH** task. Select it to run `pdr` from a terminal; the installer removes the entry it added when you uninstall PDR. Open a new terminal after installation for the updated PATH to take effect.
 
 Keep `pdr.exe` and `pdfium.dll` in the **same folder**. Add that folder to PATH to run `pdr` from a terminal or file association.
 

@@ -161,6 +161,7 @@ $iss.Add('WizardStyle=modern')
 $iss.Add('PrivilegesRequired=admin')
 $iss.Add('PrivilegesRequiredOverridesAllowed=dialog')
 $iss.Add('ChangesAssociations=yes')
+$iss.Add('ChangesEnvironment=yes')
 $iss.Add("ArchitecturesAllowed=$archAllowed")
 if ($arch64Mode) { $iss.Add("ArchitecturesInstallIn64BitMode=$arch64Mode") }
 if ($Sign) {
@@ -175,11 +176,14 @@ if ($hasJapanese) { $iss.Add('Name: "ja"; MessagesFile: "compiler:Languages\Japa
 $iss.Add('')
 $iss.Add('[CustomMessages]')
 $iss.Add('en.AssociatePdf=Associate PDF files (.pdf) with PDR')
+$iss.Add('en.AddToPath=Add PDR to PATH (run pdr from a terminal)')
 if ($hasJapanese) { $iss.Add('ja.AssociatePdf=PDF ファイル (.pdf) を PDR に関連付ける') }
+if ($hasJapanese) { $iss.Add('ja.AddToPath=PDR を PATH に追加する（ターミナルから pdr を実行）') }
 $iss.Add('')
 $iss.Add('[Tasks]')
 $iss.Add('Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked')
 $iss.Add('Name: "associatepdf"; Description: "{cm:AssociatePdf}"; Flags: unchecked')
+$iss.Add('Name: "addtopath"; Description: "{cm:AddToPath}"; Flags: unchecked')
 $iss.Add('')
 $iss.Add('[Files]')
 $iss.Add('Source: "' + $stage + '\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs')
@@ -200,6 +204,199 @@ $iss.Add('Root: HKA; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType:
 $iss.Add('')
 $iss.Add('[Run]')
 $iss.Add('Filename: "{app}\pdr.exe"; Description: "{cm:LaunchProgram,PDR}"; Flags: nowait postinstall skipifsilent')
+$iss.Add('')
+$code = @'
+[Code]
+var
+  PreviousManagedPath: String;
+  PreviousManagedRoot: String;
+  ManagedPath: String;
+  ManagedRoot: String;
+
+function EnvironmentRootKey(RootName: String): Integer;
+begin
+  if RootName = 'HKLM' then
+    Result := HKEY_LOCAL_MACHINE
+  else
+    Result := HKEY_CURRENT_USER;
+end;
+
+function CurrentEnvironmentRootName: String;
+begin
+  if IsAdminInstallMode then
+    Result := 'HKLM'
+  else
+    Result := 'HKCU';
+end;
+
+function EnvironmentSubKey(RootName: String): String;
+begin
+  if RootName = 'HKLM' then
+    Result := 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+  else
+    Result := 'Environment';
+end;
+
+function NormalizePathEntry(Value: String): String;
+begin
+  Result := Trim(Value);
+  while (Length(Result) > 3) and (Result[Length(Result)] = '\') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function PathContains(PathValue, Entry: String): Boolean;
+var
+  Index, StartPos: Integer;
+  Candidate: String;
+  AtSeparator: Boolean;
+begin
+  Result := False;
+  Entry := NormalizePathEntry(Entry);
+  StartPos := 1;
+  Index := 1;
+  while Index <= Length(PathValue) + 1 do begin
+    if Index > Length(PathValue) then
+      AtSeparator := True
+    else
+      AtSeparator := PathValue[Index] = ';';
+    if AtSeparator then begin
+      Candidate := NormalizePathEntry(Copy(PathValue, StartPos, Index - StartPos));
+      if CompareText(Candidate, Entry) = 0 then begin
+        Result := True;
+        Exit;
+      end;
+      StartPos := Index + 1;
+    end;
+    Index := Index + 1;
+  end;
+end;
+
+function RemovePathEntry(PathValue, Entry: String): String;
+var
+  Index, StartPos: Integer;
+  Candidate: String;
+  AtSeparator, HasSegment: Boolean;
+begin
+  Result := '';
+  HasSegment := False;
+  Entry := NormalizePathEntry(Entry);
+  StartPos := 1;
+  Index := 1;
+  while Index <= Length(PathValue) + 1 do begin
+    if Index > Length(PathValue) then
+      AtSeparator := True
+    else
+      AtSeparator := PathValue[Index] = ';';
+    if AtSeparator then begin
+      Candidate := Copy(PathValue, StartPos, Index - StartPos);
+      if CompareText(NormalizePathEntry(Candidate), Entry) <> 0 then begin
+        if HasSegment then
+          Result := Result + ';';
+        Result := Result + Candidate;
+        HasSegment := True;
+      end;
+      StartPos := Index + 1;
+    end;
+    Index := Index + 1;
+  end;
+end;
+
+function AddPathToEnvironment(RootName, Entry: String; KeepExisting: Boolean;
+  var IsManaged: Boolean): Boolean;
+var
+  RootKey: Integer;
+  SubKey, CurrentPath, NewPath: String;
+begin
+  IsManaged := False;
+  RootKey := EnvironmentRootKey(RootName);
+  SubKey := EnvironmentSubKey(RootName);
+  if not RegQueryStringValue(RootKey, SubKey, 'Path', CurrentPath) then
+    CurrentPath := '';
+  if PathContains(CurrentPath, Entry) then begin
+    IsManaged := KeepExisting;
+    Result := True;
+    Exit;
+  end;
+  if CurrentPath = '' then
+    NewPath := Entry
+  else
+    NewPath := CurrentPath + ';' + Entry;
+  Result := RegWriteExpandStringValue(RootKey, SubKey, 'Path', NewPath);
+  IsManaged := Result;
+end;
+
+function RemovePathFromEnvironment(RootName, Entry: String): Boolean;
+var
+  RootKey: Integer;
+  SubKey, CurrentPath, NewPath: String;
+begin
+  RootKey := EnvironmentRootKey(RootName);
+  SubKey := EnvironmentSubKey(RootName);
+  if not RegQueryStringValue(RootKey, SubKey, 'Path', CurrentPath) then begin
+    Result := True;
+    Exit;
+  end;
+  NewPath := RemovePathEntry(CurrentPath, Entry);
+  if NewPath = CurrentPath then begin
+    Result := True;
+    Exit;
+  end;
+  if NewPath = '' then
+    Result := RegDeleteValue(RootKey, SubKey, 'Path')
+  else
+    Result := RegWriteExpandStringValue(RootKey, SubKey, 'Path', NewPath);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  PreviousManagedPath := GetPreviousData('ManagedPath', '');
+  PreviousManagedRoot := GetPreviousData('ManagedRoot', '');
+  ManagedPath := '';
+  ManagedRoot := '';
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CurrentPath, CurrentRoot: String;
+  KeepPrevious, IsManaged: Boolean;
+begin
+  if CurStep = ssPostInstall then begin
+    CurrentPath := NormalizePathEntry(ExpandConstant('{app}'));
+    CurrentRoot := CurrentEnvironmentRootName;
+    KeepPrevious := (PreviousManagedPath <> '') and
+      (CompareText(NormalizePathEntry(PreviousManagedPath), CurrentPath) = 0) and
+      (PreviousManagedRoot = CurrentRoot);
+
+    if not KeepPrevious and (PreviousManagedPath <> '') then
+      RemovePathFromEnvironment(PreviousManagedRoot, PreviousManagedPath);
+
+    if WizardIsTaskSelected('addtopath') then begin
+      if AddPathToEnvironment(CurrentRoot, CurrentPath, KeepPrevious, IsManaged) then begin
+        if IsManaged then begin
+          ManagedPath := CurrentPath;
+          ManagedRoot := CurrentRoot;
+        end;
+      end else
+        MsgBox('PDR could not update PATH. You can add the installation folder manually.', mbError, MB_OK);
+    end else if KeepPrevious then
+      RemovePathFromEnvironment(PreviousManagedRoot, PreviousManagedPath);
+  end;
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'ManagedPath', ManagedPath);
+  SetPreviousData(PreviousDataKey, 'ManagedRoot', ManagedRoot);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if (CurUninstallStep = usUninstall) and (GetPreviousData('ManagedPath', '') <> '') then
+    RemovePathFromEnvironment(GetPreviousData('ManagedRoot', 'HKCU'), GetPreviousData('ManagedPath', ''));
+end;
+'@
+foreach ($line in ($code -split "`r?`n")) { $iss.Add($line) }
 
 # Inno Setup は BOM の無い .iss を ANSI として読むため、UTF-8 BOM 付きで書く。
 $issPath = Join-Path $workDir 'pdr.iss'
