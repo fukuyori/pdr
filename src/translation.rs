@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const LANGUAGES: [(&str, &str); 6] = [
     ("日本語", "Japanese"),
@@ -186,8 +186,8 @@ pub(crate) struct TranslationWindow {
     source: String,
     result: String,
     error: Option<String>,
-    source_fraction: f32,
-    splitter_drag_origin: Option<(f32, f32)>,
+    font_scale: f32,
+    base_style: Option<egui::Style>,
 }
 
 impl Default for TranslationWindow {
@@ -209,8 +209,8 @@ impl Default for TranslationWindow {
             source: String::new(),
             result: String::new(),
             error: None,
-            source_fraction: 0.5,
-            splitter_drag_origin: None,
+            font_scale: 1.0,
+            base_style: None,
         }
     }
 }
@@ -299,8 +299,8 @@ impl TranslationWindow {
         let viewport_id = egui::ViewportId::from_hash_of("translation-window");
         let viewport = egui::ViewportBuilder::default()
             .with_title("翻訳 — Ollama")
-            .with_inner_size([600.0, 620.0])
-            .with_min_inner_size([480.0, 420.0])
+            .with_inner_size([960.0, 680.0])
+            .with_min_inner_size([720.0, 480.0])
             .with_resizable(true);
         let open = ctx.show_viewport_immediate(viewport_id, viewport, |viewport_ctx, _class| {
             let open = !viewport_ctx.input(|input| input.viewport().close_requested());
@@ -317,6 +317,20 @@ impl TranslationWindow {
     }
 
     fn show_contents(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let (control_held, zoom_delta) =
+            ctx.input(|input| (input.modifiers.ctrl, input.zoom_delta()));
+        if control_held && zoom_delta.is_finite() && (zoom_delta - 1.0).abs() > f32::EPSILON {
+            self.font_scale = (self.font_scale * zoom_delta).clamp(0.6, 3.0);
+        }
+        if self.base_style.is_none() {
+            self.base_style = Some((**ui.style()).clone());
+        }
+        let mut style = self.base_style.as_ref().unwrap().clone();
+        for font in style.text_styles.values_mut() {
+            font.size *= self.font_scale;
+        }
+        ui.set_style(style);
+
         let settings_header = egui::CollapsingHeader::new("翻訳設定")
             .id_salt("translation-settings")
             .default_open(self.settings.settings_expanded)
@@ -393,99 +407,97 @@ impl TranslationWindow {
             self.save();
         }
         ui.separator();
-        ui.label("選択した原文");
-        let available_height = ui.available_height();
-        let controls_height = 80.0 + if self.error.is_some() { 22.0 } else { 0.0 };
-        let pane_budget = (available_height - controls_height - 14.0).max(140.0);
-        let source_height = (pane_budget * self.source_fraction).clamp(70.0, pane_budget - 70.0);
-        let width = ui.available_width();
-        egui::ScrollArea::vertical()
-            .id_salt("translation-source")
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-            .auto_shrink([false, false])
-            .min_scrolled_height(source_height)
-            .max_height(source_height)
-            .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.source.as_str())
-                        .desired_width(f32::INFINITY),
-                );
-            });
-        let (splitter_rect, splitter) =
-            ui.allocate_exact_size(egui::vec2(width, 14.0), egui::Sense::drag());
-        if splitter.drag_started()
-            && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
-        {
-            self.splitter_drag_origin = Some((self.source_fraction, pointer.y));
-        }
-        if splitter.dragged() {
-            if let (Some((start_fraction, start_y)), Some(pointer)) =
-                (
-                    self.splitter_drag_origin,
-                    ui.input(|input| input.pointer.interact_pos()),
-                )
-            {
-                self.source_fraction =
-                    (start_fraction + (pointer.y - start_y) / pane_budget).clamp(0.18, 0.82);
-            }
-        }
-        if splitter.drag_stopped() {
-            self.splitter_drag_origin = None;
-        }
-        if splitter.hovered() || splitter.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-        }
-        ui.painter().rect_filled(
-            splitter_rect.shrink2(egui::vec2(width * 0.42, 3.0)),
-            2.0,
-            if splitter.hovered() || splitter.dragged() {
-                ui.visuals().widgets.active.bg_fill
-            } else {
-                ui.visuals().widgets.inactive.bg_fill
-            },
-        );
+        const PANE_GAP: f32 = 14.0;
+        let pane_width = ((ui.available_width() - PANE_GAP) * 0.5).max(200.0);
         let ready = self.translation_rx.is_none()
             && !self.source.trim().is_empty()
             && self.models.contains(&self.settings.model)
             && self.models_rx.is_none();
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(ready, egui::Button::new("翻訳する"))
-                .clicked()
-            {
-                self.start_translation(ctx);
-            }
-            if self.translation_rx.is_some() {
-                ui.spinner();
-                ui.label("翻訳中…");
-            }
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let source_header = ui.allocate_ui_with_layout(
+                egui::vec2(pane_width, 32.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.label("原文");
+                    if ui
+                        .add_enabled(ready, egui::Button::new("翻訳する"))
+                        .clicked()
+                    {
+                        self.start_translation(ctx);
+                    }
+                    if self.translation_rx.is_some() {
+                        ui.spinner();
+                        ui.label("翻訳中…");
+                    }
+                },
+            );
+            ui.add_space((pane_width - source_header.response.rect.width()).max(0.0) + PANE_GAP);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label("翻訳");
+                if ui
+                    .add_enabled(!self.result.is_empty(), egui::Button::new("コピー"))
+                    .clicked()
+                {
+                    ctx.copy_text(self.result.clone());
+                }
+            });
         });
         if let Some(error) = &self.error {
             ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        ui.separator();
+        let pane_height = ui.available_height().max(140.0);
         ui.horizontal(|ui| {
-            ui.label("翻訳結果");
-            if ui
-                .add_enabled(!self.result.is_empty(), egui::Button::new("結果をコピー"))
-                .clicked()
-            {
-                ctx.copy_text(self.result.clone());
-            }
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(pane_width, pane_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("translation-source")
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(pane_height)
+                        .max_height(pane_height)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.source.as_str())
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                },
+            );
+            let (gap_rect, _) =
+                ui.allocate_exact_size(egui::vec2(PANE_GAP, pane_height), egui::Sense::hover());
+            ui.painter().vline(
+                gap_rect.center().x,
+                gap_rect.y_range().shrink(pane_height * 0.08),
+                egui::Stroke::new(1.0, ui.visuals().widgets.inactive.bg_fill),
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(pane_width, pane_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("translation-result")
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
+                        .auto_shrink([false, false])
+                        .min_scrolled_height(pane_height)
+                        .max_height(pane_height)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.result.as_str())
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                },
+            );
         });
-        let result_height = ui.available_height().max(70.0);
-        egui::ScrollArea::vertical()
-            .id_salt("translation-result")
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-            .auto_shrink([false, false])
-            .min_scrolled_height(result_height)
-            .max_height(result_height)
-            .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.result.as_str())
-                        .desired_width(f32::INFINITY),
-                );
-            });
     }
 }
 
@@ -576,12 +588,10 @@ mod tests {
             assert_eq!(body["model"], "local:7b");
             assert_eq!(body["stream"], false);
             assert_eq!(body["messages"][1]["content"], source);
-            assert!(
-                body["messages"][0]["content"]
-                    .as_str()
-                    .unwrap()
-                    .contains(language)
-            );
+            assert!(body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains(language));
         }
     }
 
@@ -593,11 +603,9 @@ mod tests {
             (200, r#"{"message":{"content":""}}"#, "翻訳結果が返りません"),
         ] {
             let (endpoint, worker) = server(status, body);
-            assert!(
-                translate(&endpoint, "local", 0, "Hello")
-                    .unwrap_err()
-                    .contains(expected)
-            );
+            assert!(translate(&endpoint, "local", 0, "Hello")
+                .unwrap_err()
+                .contains(expected));
             worker.join().unwrap();
         }
     }

@@ -1,54 +1,74 @@
-# PDR — ポータブル・ドキュメント・リーダー
+# PDR — Portable Document Reader
 
-PDF を快適に読むための Rust 製デスクトップ・ビューア（Windows）。
-egui/eframe + pdfium による描画で、見開き・縦横綴じ・目次・適応解像度の別スレッド描画に対応。
+[English](README.md) | [日本語](README.ja.md)
 
-## 機能
+A Rust desktop PDF viewer built with egui/eframe and PDFium. It supports single-page and two-page spread views, left-to-right and right-to-left page binding, table of contents, and adaptive-resolution rendering on a background thread.
 
-- **PDF 表示**: 見開き / 単ページ、右綴じ(和) / 左綴じ(洋)、表紙単独
-- **目次（しおり）**: ある PDF では左に自動表示。クリックでジャンプ、幅も変更可
-- **ページ移動**: 前後ボタン、矢印/PageUp/Down/Space、下部スライダー
-- **文字の範囲選択**: プライマリボタンのドラッグで、選択したページの文字をハイライト。単ページ・見開き、拡大・回転表示に対応。文字情報のない画像だけの PDF は対象外
-- **コピー・翻訳**: ハイライトした文字上のセカンダリクリックで「コピー」「翻訳」。翻訳は指定した Ollama のモデルを使用し、日本語・英語・中国語・ドイツ語・スペイン語・フランス語に対応
-- **表示位置の移動**: セカンダリボタンのドラッグ、ホイール、スクロールバーでパン。セカンダリクリックではページ回転メニューを表示
-- **拡大縮小**: マウスホイール。横/縦フィットへスナップ、ウィンドウのリサイズに追従
-- **画像補正**: スキャンPDF向けに、ページ単位の自動レベル補正、強度調整可能なコントラスト／アンシャープマスク、大津法二値化
-- **高速描画**: 別スレッドでレンダリングし UI をブロックしない。表示サイズに応じた適応解像度＋前後ページの先読み
-- **復元**: 表示モード、綴じ方向、表紙単独表示、画像補正、目次幅、翻訳設定を次回起動時に復元。起動時はブランクページを表示し、PDF・ページ位置・一時回転・文字選択・フィット方法・ズーム倍率は復元しない
+## Features
 
-## 必要なもの
+- **PDF viewing**: single-page or two-page spread, left-to-right or right-to-left binding, and a standalone cover page
+- **Table of contents (bookmarks)**: shown automatically for supported PDFs; click an entry to navigate, and resize the panel
+- **Navigation**: previous/next buttons, arrow keys, Page Up/Down, Space, and the bottom slider
+- **Text selection**: drag with the primary mouse button to highlight text on a page. Works in single-page and spread views, including zoomed and rotated pages. Image-only PDFs without text data are not supported.
+- **Copy and translate**: right-click highlighted text to copy it or translate it with a selected Ollama model. Translation supports Japanese, English, Chinese, German, Spanish, and French.
+- **Panning**: drag with the secondary mouse button, use the wheel, or use the scrollbars. A secondary click opens the page rotation menu.
+- **Zoom**: use the mouse wheel. The view snaps to fit-width or fit-height and follows window resizing.
+- **Image enhancement**: per-page auto-level correction, adjustable contrast and unsharp mask, and Otsu binarization for scanned PDFs
+- **Fast rendering**: render pages on a background thread without blocking the UI, with resolution adapted to the display size and adjacent-page prefetching
+- **Settings restore**: display mode, page binding, standalone cover, image enhancement, table-of-contents width, and translation settings are restored at the next launch. PDR starts with a blank page and does not restore the previous PDF, page position, temporary rotation, text selection, fit mode, or zoom level.
 
-### Ollama による翻訳
+## Ollama translation
 
-ツールバーの「翻訳設定」で、Ollama の接続先（例: `http://localhost:11434`）を入力し、
-「モデル一覧を更新」を押してください。使用モデルと翻訳先言語をドロップダウンで選びます。
-接続先・モデル・言語は保存されます。接続先を変更した場合は、モデル一覧を再取得してください。
-翻訳設定の折りたたみ状態も保存されます。翻訳ウィンドウはサイズ変更でき、原文・訳文欄は個別スクロールと高さ調整に対応します。
+### Install Ollama and download the tested model
 
-表示モード、綴じ方向、表紙単独表示、画像補正、目次幅は次回起動時に復元されます。
-起動時はブランクページを表示し、前回の PDF は自動では開きません。ファイルを指定して起動した場合も、保存済みのこれらの設定を適用します。
-表示設定は Windows の `%APPDATA%\pdr\settings.json`、macOS の
-`~/Library/Application Support/pdr/settings.json`、Linux の
-`$XDG_CONFIG_HOME/pdr/settings.json`（未設定時は `~/.config/pdr/settings.json`）に保存します。
+Install Ollama using the [official download page](https://ollama.com/download). The official command-line installation options are:
 
-文字を選択し、そのハイライト上で右クリックして「翻訳」を選ぶと翻訳画面が開きます。
-モデル一覧の取得・設定が済んでいれば翻訳を開始します。初回や再起動後はモデル一覧を取得し、
-「翻訳する」を押してください。結果は同じ画面に表示され、「結果をコピー」でコピーできます。
-通信はバックグラウンドで実行され、失敗時は画面にエラーを表示します。
-Ollama の起動と使用するモデルの準備は事前に行ってください。
+```sh
+# macOS and Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
 
-翻訳設定は Windows では `%APPDATA%\pdr\translation.json`、macOS では
-`~/Library/Application Support/pdr/translation.json`、Linux では
-`$XDG_CONFIG_HOME/pdr/translation.json`（未設定時は `~/.config/pdr/translation.json`）に保存します。
+```powershell
+# Windows PowerShell
+irm https://ollama.com/install.ps1 | iex
+```
 
-### ビューアの動作環境
+PDR has been tested with **`translategemma:4b`**. Download it from a terminal after installing Ollama:
 
-- Rust（stable, MSVC）
-- `pdfium.dll`（Windows x64）— **同梱済み**（`third_party/pdfium/pdfium.dll`）。クローンしてそのままビルド・実行できます。
+```sh
+ollama pull translategemma:4b
+```
 
-`pdfium.dll` は次の順で探索されます: 実行ファイルと同じフォルダ → カレントディレクトリ → `./third_party/pdfium` → `./lib/bin` → システム。`cargo run`（カレント = リポジトリ直下）なら同梱物がそのまま使われます。配布する場合は `pdfium.dll` を実行ファイルと同じフォルダに置いてください。
+See the [TranslateGemma model page](https://ollama.com/library/translategemma) for model details.
 
-同梱している PDFium のビルドは [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) の Windows x64 版です（バージョンは `third_party/pdfium/VERSION`）。更新する場合:
+### Configure and translate
+
+In the translation window, expand **「翻訳設定」** (Translation Settings), enter an Ollama endpoint (for example, `http://localhost:11434`), and click **「モデル一覧を更新」** (Refresh model list). Select **`translategemma:4b`** from the model dropdown and choose a target language. The endpoint, model, target language, and settings-panel collapsed state are saved.
+
+The translation window can be resized. The source and translation panes have equal widths and separate scrollbars. Hold **Ctrl** while using the mouse wheel in the window to enlarge or reduce its font.
+
+Select text in the PDF and right-click the highlighted text to open the translation window. If the selected model is already available, translation starts automatically; otherwise, refresh the model list and click **「翻訳する」** (Translate). The result appears in the same window; click **「コピー」** (Copy) to copy it. Translation runs in the background, and errors are shown in the window. Start Ollama and make sure the model you want to use is available before translating.
+
+Translation settings are saved in:
+
+- Windows: `%APPDATA%\pdr\translation.json`
+- macOS: `~/Library/Application Support/pdr/translation.json`
+- Linux: `$XDG_CONFIG_HOME/pdr/translation.json` (or `~/.config/pdr/translation.json` when unset)
+
+Display settings are saved in:
+
+- Windows: `%APPDATA%\pdr\settings.json`
+- macOS: `~/Library/Application Support/pdr/settings.json`
+- Linux: `$XDG_CONFIG_HOME/pdr/settings.json` (or `~/.config/pdr/settings.json` when unset)
+
+## Requirements
+
+- Rust (stable, MSVC on Windows)
+- `pdfium.dll` (Windows x64) is included at `third_party/pdfium/pdfium.dll`; you can clone, build, and run the project as-is on Windows.
+
+PDR searches for `pdfium.dll` in this order: next to the executable, the current directory, `./third_party/pdfium`, `./lib/bin`, and then system locations. When running `cargo run` from the repository root, the bundled file is found automatically. For distribution, place `pdfium.dll` next to the executable.
+
+The bundled PDFium build is the Windows x64 build from [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) (see `third_party/pdfium/VERSION`). To update it:
 
 ```sh
 curl -sL -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
@@ -57,59 +77,58 @@ mv bin/pdfium.dll third_party/pdfium/pdfium.dll
 mv LICENSE VERSION licenses third_party/pdfium/
 ```
 
-## ビルドと実行
+## Build and run
 
 ```sh
-cargo run                 # 起動
-cargo run -- path/to.pdf  # 指定 PDF を開いて起動
-cargo test                # テスト
+cargo run                 # Launch PDR
+cargo run -- path/to.pdf  # Open a PDF on launch
+cargo test                # Run tests
 ```
 
-配布する場合は `pdfium.dll` を実行ファイルと同じフォルダに置いてください。
+For distribution, place `pdfium.dll` next to the executable.
 
-## Linux deb パッケージ作成
+## Build a Linux deb package
 
-Linux 用の deb は次で作成できます。
+Create a Linux deb package with:
 
 ```sh
 scripts/package-deb.sh --download-pdfium
 ```
 
-出力は `dist/pdr_<version>_<arch>.deb` です。既に `third_party/pdfium/libpdfium.so` がある場合は `--download-pdfium` なしで実行できます。ビルド済みバイナリを使う場合は `scripts/package-deb.sh --no-build` を指定してください。
+The output is `dist/pdr_<version>_<arch>.deb`. If `third_party/pdfium/libpdfium.so` is already present, omit `--download-pdfium`. To use an existing build, pass `--no-build` to `scripts/package-deb.sh`.
 
-## インストール（PATH に置いてどこからでも使う）
+## Install on Windows and add PDR to PATH
 
-`pdr.exe` と `pdfium.dll` を**同じフォルダにまとめて置く**だけで、どこからでも起動できます。さらにそのフォルダを PATH に通すと、ターミナルや関連付けから `pdr` を直接呼べます。
+Keep `pdr.exe` and `pdfium.dll` in the **same folder**. Add that folder to PATH to run `pdr` from a terminal or file association.
 
-1. 配布 zip（`pdr-x.y.z-win-x64.zip`）を展開する。
-   （または `cargo build --release` 後に `target\release\pdr.exe` と `third_party\pdfium\pdfium.dll` を用意）
-2. 置き場所を作り（例: `%USERPROFILE%\bin`）、**`pdr.exe` と `pdfium.dll` の両方**をそこへコピーする。
-3. そのフォルダを PATH に追加する（PowerShell・ユーザー環境変数の例。設定後はターミナルを開き直す）:
+1. Extract the distribution archive (`pdr-x.y.z-win-x64.zip`), or use `target\release\pdr.exe` and `third_party\pdfium\pdfium.dll` after running `cargo build --release`.
+2. Create a destination folder (for example, `%USERPROFILE%\bin`) and copy **both `pdr.exe` and `pdfium.dll`** there.
+3. Add the folder to your user PATH. This PowerShell example takes effect in newly opened terminals:
 
    ```powershell
    setx PATH "$env:USERPROFILE\bin;$env:PATH"
    ```
 
-4. 以降はどこからでも実行できる:
+4. Run PDR from any directory:
 
    ```powershell
    pdr "C:\path\to\file.pdf"
    ```
 
-> **重要**: `pdfium.dll` は必ず `pdr.exe` と**同じフォルダ**に置いてください（PATH 上の別フォルダではなく exe と同居が必要）。本アプリは実行ファイルと同じフォルダを最優先で探すため、これで起動ディレクトリに関係なく動作します。
+> **Important:** Keep `pdfium.dll` in the same folder as `pdr.exe`; placing it in another folder on PATH is not sufficient. PDR searches next to its executable first, so it can find the DLL regardless of the working directory.
 
-## 補助バイナリ
+## Utility binary
 
-- `cargo run --bin smoke -- <pdf> [page] [none|contrast|auto|sharpen|binarize] [strength]` — ヘッドレスで1ページをPNG出力
-- `cargo run --bin smoke -- <pdf> toc` — 目次（しおり）をダンプ
-- `cargo run --bin smoke -- <pdf> bench [width] [count]` — 1 ページ描画の所要時間を計測
+- `cargo run --bin smoke -- <pdf> [page] [none|contrast|auto|sharpen|binarize] [strength]` — render one page to PNG without the GUI
+- `cargo run --bin smoke -- <pdf> toc` — dump the table of contents (bookmarks)
+- `cargo run --bin smoke -- <pdf> bench [width] [count]` — measure the time to render one page
 
-## ライセンス
+## License
 
-本体のコードは **Apache License 2.0**（[LICENSE](LICENSE)）。
+The application code is licensed under **Apache License 2.0** ([LICENSE](LICENSE)).
 
-本ソフトウェアは描画に [PDFium](https://pdfium.googlesource.com/pdfium/)（**BSD-3-Clause** 他）を利用し、ビルド済みの `pdfium.dll` を `third_party/pdfium/` に**同梱**しています。PDFium および同梱コンポーネントのライセンスは以下にあります。配布物（バイナリ）にはこれらを同梱してください（[NOTICE](NOTICE) 参照）。
+PDR uses [PDFium](https://pdfium.googlesource.com/pdfium/) (**BSD-3-Clause** and other licenses) for rendering and includes a prebuilt `pdfium.dll` in `third_party/pdfium/`. Include the applicable licenses in distributions; see [NOTICE](NOTICE).
 
-- `third_party/pdfium/LICENSE` — pdfium-binaries 梱包（MIT, Benoit Blanchon）
-- `third_party/pdfium/licenses/pdfium.txt` — PDFium 本体（BSD-3-Clause, Google）
-- `third_party/pdfium/licenses/` — FreeType・libpng・zlib・ICU 等の各ライセンス
+- `third_party/pdfium/LICENSE` — pdfium-binaries packaging (MIT, Benoit Blanchon)
+- `third_party/pdfium/licenses/pdfium.txt` — PDFium (BSD-3-Clause, Google)
+- `third_party/pdfium/licenses/` — licenses for FreeType, libpng, zlib, ICU, and other components
