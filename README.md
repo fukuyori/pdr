@@ -10,7 +10,8 @@ A Rust desktop PDF viewer built with egui/eframe and PDFium. It supports single-
 - **Table of contents (bookmarks)**: shown automatically for supported PDFs; click an entry to navigate, and resize the panel
 - **Navigation**: previous/next buttons, arrow keys, Page Up/Down, Space, and the bottom slider
 - **Text selection**: drag with the primary mouse button to highlight text on a page. Works in single-page and spread views, including zoomed and rotated pages. Image-only PDFs without text data are not supported.
-- **Copy and translate**: right-click highlighted text to copy it or translate it with a selected Ollama model. Translation supports Japanese, English, Chinese, German, Spanish, and French.
+- **Copy**: right-click highlighted text to copy the selected text.
+- **Translation**: translate highlighted text with a selected local Ollama model. Choose Japanese, English, Chinese, German, Spanish, or French as the target language.
 - **Panning**: drag with the secondary mouse button, use the wheel, or use the scrollbars. A secondary click opens the page rotation menu.
 - **Zoom**: use the mouse wheel. The view snaps to fit-width or fit-height and follows window resizing.
 - **Image enhancement**: per-page auto-level correction, adjustable contrast and unsharp mask, and Otsu binarization for scanned PDFs
